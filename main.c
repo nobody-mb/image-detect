@@ -52,6 +52,49 @@ struct line_entry {
 	
 };
 
+struct queue {
+	struct node {
+		int item;
+		struct node *next;
+	} *head, *tail;
+
+	int size;
+};
+
+void push (struct queue *queue, int src) 
+{
+	struct node *n = calloc(sizeof(struct node), 1);
+	
+	n->item = (src);
+	n->next = NULL;
+	
+	if (queue->head == NULL)
+		queue->head = n;
+	else
+		queue->tail->next = n;
+	
+	queue->tail = n;
+	queue->size++;
+}
+int pop (struct queue *queue) 
+{
+	struct node *head = queue->head;
+	int item = 0;
+	
+	if (queue->size <= 0)
+		return item;
+	
+	item = head->item;
+	
+	queue->head = head->next;
+	queue->size--;
+	
+	free(head);
+	
+	return item;
+}
+
+
 int split_lines (struct img_dt src, unsigned char background, struct line_entry **out_lines)
 {
 	int cur_y = 0;
@@ -149,41 +192,91 @@ int flood_fill (struct img_dt src, int pos, unsigned char *find,
 	return 0;
 }
 
-int fill_lines (struct img_dt src, struct line_entry *lines, int num_lines, unsigned char *background, unsigned char *rep)
+
+int flood_cmp (struct img_dt src, int pos_src, int pos_dst, 
+		int *missing_pixels, int threshold)
+{
+	if (pos_src < 0 || src.used[pos_src] || pos_dst < 0 || src.used[pos_dst])
+		return -1;
+	
+	if (memcmp(&src.flat[pos_src], &src.flat[pos_dst], src.pixsz))
+		if (++(*missing_pixels) > threshold)
+			return -1;
+	
+	src.used[pos_src] = 1;
+	src.used[pos_dst] = 1;
+	
+	flood_cmp(src,  index_flat(src, pos_src, 0, -1), 
+			index_flat(src, pos_dst, 0, -1), 
+			missing_pixels, threshold);
+	flood_cmp(src,  index_flat(src, pos_src, 0,  1), 
+			index_flat(src, pos_dst, 0,  1), 
+			missing_pixels, threshold);
+	flood_cmp(src,  index_flat(src, pos_src, -1, 0), 
+			index_flat(src, pos_dst, -1, 0), 
+			missing_pixels, threshold);
+	flood_cmp(src,  index_flat(src, pos_src, 1,  0), 
+			index_flat(src, pos_dst, 1,  0), 
+			missing_pixels, threshold);
+	
+	flood_cmp(src,  index_flat(src, pos_src, 1, -1), 
+			index_flat(src, pos_dst, 1, -1), 
+			missing_pixels, threshold);
+	flood_cmp(src,  index_flat(src, pos_src, -1, 1), 
+			index_flat(src, pos_dst, -1, 1), 
+			missing_pixels, threshold);
+	flood_cmp(src,  index_flat(src, pos_src, -1,-1), 
+			index_flat(src, pos_dst, -1,-1), 
+			missing_pixels, threshold);
+	flood_cmp(src,  index_flat(src, pos_src, 1,  1), 
+			index_flat(src, pos_dst, 1,  1), 
+			missing_pixels, threshold);
+	
+	return *missing_pixels;
+}
+
+
+int fill_lines (struct img_dt src, struct line_entry *lines, int num_lines, 
+		unsigned char *background, unsigned char *rep, int **letter_pos)
 {
 	int last_mid_line, mid_line, i, pos;
 	int end = (src.x * src.y);
+	struct queue letter_queue;
+	int num_letters = 0;
+	
+	memset(&letter_queue, 0, sizeof(struct queue));
 	
 	mid_line = last_mid_line = 0;
 	
 	for (i = 0; i < num_lines; i++) {
-		printf("line %d: %d -> %d\n", i, lines[i].start, lines[i].end);
-		
-		last_mid_line = mid_line + (5 * src.x);
+		last_mid_line = mid_line + (10 * src.x);
 		mid_line = src.x * ((lines[i].end + lines[i].start) / 2);
 		
 		memset(&src.flat[mid_line], 0x40, src.x);
 
-		for (pos = last_mid_line; pos < mid_line; pos += src.pixsz) {
-			if (!flood_fill(src, pos, background, rep, 127)) {
-				printf("letter at pos %d\n", pos);
-				src.flat[pos+0] = 0x90;
-				src.flat[pos+1] = 0x10;
-				src.flat[pos+2] = 0x10;
-			}
-		}
+		for (pos = last_mid_line; pos < mid_line; pos += src.pixsz)
+			if (!flood_fill(src, pos, background, rep, 127))
+				push(&letter_queue, pos);
+				
+		for (pos = (last_mid_line - (9 * src.x)); pos < last_mid_line; 
+							pos += src.pixsz)
+			if (!flood_fill(src, pos, background, rep, 127))
+				push(&letter_queue, pos);
 	}
 	
-	for (pos = mid_line + src.x; pos < end; pos += src.pixsz) {
-		if (!flood_fill(src, pos, background, rep, 127)) {
-			printf("letter at pos %d\n", pos);
-			src.flat[pos+0] = 0x90;
-			src.flat[pos+1] = 0x10;
-			src.flat[pos+2] = 0x10;
-		}
-	}
+	for (pos = mid_line + src.x; pos < end; pos += src.pixsz)
+		if (!flood_fill(src, pos, background, rep, 127))
+			push(&letter_queue, pos);
+
+	num_letters = letter_queue.size;
 	
-	return 0;
+	*letter_pos = calloc(sizeof(int), letter_queue.size + 1);
+	i = 0;
+	
+	while (letter_queue.size) 
+		(*letter_pos)[i++] = pop(&letter_queue);
+	
+	return num_letters;
 }
 
 int main (int argc, const char **argv)
@@ -194,49 +287,52 @@ int main (int argc, const char **argv)
 	
 	if (alloc_img_from_file("/Users/nobody1/Desktop/test.png", &src, 0))
 		return -1;
-	
-	int end = (src.x * src.y);
+
 	src.used = calloc(sizeof(char), src.x * src.y);
 	int i, pos = 0;
-	
 	
 	struct line_entry *lines;
 	int num_lines = split_lines(src, 0xFF, &lines);
 	
-	fill_lines(src, lines, num_lines, background, rep);
-	/*
-	int last_mid_line, mid_line;
+	for (i = 0; i < num_lines; i++)
+		printf("line %d: row %d - %d\n", i, lines[i].start, lines[i].end);
 	
-	mid_line = last_mid_line = 0;
+	int *letters;
+	int num_letters;
 	
-	for (i = 0; i < num_lines; i++) {
-		printf("line %d: %d -> %d\n", i, lines[i].start, lines[i].end);
+	num_letters = fill_lines(src, lines, num_lines, background, rep, &letters);
+	
+	for (i = 0; i < num_letters; i++) {
+		pos = letters[i];
 		
-		last_mid_line = mid_line + (5 * src.x);
-		mid_line = src.x * ((lines[i].end + lines[i].start) / 2);
-		
-		memset(&src.flat[mid_line], 0x40, src.x);
-
-		for (pos = last_mid_line; pos < mid_line; pos += src.pixsz) {
-			if (!flood_fill(src, pos, background, rep, 127)) {
-				printf("letter at pos %d\n", pos);
-				src.flat[pos+0] = 0x90;
-				src.flat[pos+1] = 0x10;
-				src.flat[pos+2] = 0x10;
-			}
-		}
-	}
-	
-	for (pos = mid_line + src.x; pos < end; pos += src.pixsz) {
-		if (!flood_fill(src, pos, background, rep, 127)) {
-			printf("letter at pos %d\n", pos);
+		printf("letter at pos %d\n", pos);
 			src.flat[pos+0] = 0x90;
 			src.flat[pos+1] = 0x10;
 			src.flat[pos+2] = 0x10;
-		}
 	}
-*/
+	
+	
+	
+	for (i = 0; i < num_letters; i++) {
+		int j, res;
+		for (j = 0; j < num_letters; j++) {
+			if (i == j)
+				continue;
+			int missing_pix = 0;
+			
+			memset(src.used, 0, src.x * src.y);
+			
+			if ((res = flood_cmp(src, letters[i], letters[j], 
+					&missing_pix, 4)) >= 0 && res < 4)
+				printf("letter %d = letter %d\n", i, j);
+		}
+	
+		if (j == num_letters)
+			printf("done searching for ind %d\n", i);
+	}
+	
 	free(lines);
+	free(letters);
 	
 	if (stbi_write_png("/Users/nobody1/Desktop/out.png", src.x / src.pixsz, src.y, 
 			   src.pixsz, src.flat, src.x) < 0)
