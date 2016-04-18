@@ -78,6 +78,74 @@ int flood_fill (struct img_dt src, int pos, unsigned char *find,
 	return 0;
 }
 
+struct line_entry {
+	int start, end;
+	
+};
+
+int split_lines (struct img_dt src, unsigned char background, struct line_entry **out_lines)
+{
+	int cur_y = 0;
+	int pos = 0, max = src.x * src.y;
+	int state = 0;
+	int line_no = 0;
+	int num_lines = 0;
+	
+	unsigned char *bg_line = calloc(src.x + 1, sizeof(char));
+	
+	memset(bg_line, background, src.x);
+	
+	for (pos = 0; pos < max; ) {
+		if (!memcmp(&src.flat[pos], bg_line, src.x)) {
+			if (state == 0) {
+				state = 1;
+			}
+		} else {
+			if (state == 1) {
+				num_lines++;
+				state = 0;
+			} 
+		}
+		
+		cur_y++;
+		pos += src.x;
+	}
+	
+	cur_y = 0;
+	state = 0;
+	pos = 0;
+	
+	if (!num_lines)
+		return 0;
+	
+	struct line_entry *lines = calloc(sizeof(struct line_entry), num_lines);
+	*out_lines = lines;
+	
+	for (pos = 0; pos < max; ) {
+		if (!memcmp(&src.flat[pos], bg_line, src.x)) {
+			if (state == 0) {
+				state = 1;
+				lines[line_no].start = cur_y;
+			} 
+		} else {
+			if (state == 1) {
+				lines[line_no].end = cur_y;
+				line_no++;
+				state = 0;
+			} 
+		}
+		
+		cur_y++;
+		pos += src.x;
+	}
+	
+	free(bg_line);
+	
+	return num_lines;
+}
+
+
+
 int main (int argc, const char **argv)
 {
 	struct img_dt src;
@@ -93,6 +161,18 @@ int main (int argc, const char **argv)
 	
 	for (pos = 0; pos < end; pos += src.pixsz)
 		flood_fill(src, pos, background, rep, 96);
+	
+	struct line_entry *lines;
+	int num_lines = split_lines(src, 0xFF, &lines);
+	
+	
+	int i;
+	
+	for (i = 0; i < num_lines; i++) {
+		printf("line %d: %d -> %d\n", i, lines[i].start, lines[i].end);
+	}
+	
+	free(lines);
 	
 	if (stbi_write_png("/Users/nobody1/Desktop/out.png", src.x / src.pixsz, src.y, 
 			   src.pixsz, src.flat, src.x) < 0)
