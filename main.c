@@ -47,37 +47,6 @@ int index_flat (struct img_dt src, int pos, int dx, int dy)
 	return (src.x * (cy + dy)) + (cx + (dx * src.pixsz));
 }
 
-int flood_fill (struct img_dt src, int pos, unsigned char *find, 
-		unsigned char *rep, int threshold)
-{
-	if (pos < 0 || src.used[pos])
-		return -1;
-	
-	int i, total = 0;
-	for (i = 0; i < src.pixsz; i++) {
-		if (src.flat[pos + i] > find[i])
-			total += (src.flat[pos + i] - find[i]);
-		else
-			total += (find[i] - src.flat[pos + i]);
-	}
-
-	if (total <= (threshold * src.pixsz)) {
-		memcpy(&src.flat[pos], find, src.pixsz);
-		return -1;
-	}
-	
-	src.used[pos] = 1;
-	
-	memcpy(&src.flat[pos], rep, src.pixsz);
-	
-	flood_fill(src, index_flat(src, pos, 0, -1), find, rep, threshold);
-	flood_fill(src, index_flat(src, pos, 0,  1), find, rep, threshold);
-	flood_fill(src, index_flat(src, pos, -1, 0), find, rep, threshold);
-	flood_fill(src, index_flat(src, pos, 1,  0), find, rep, threshold);
-	
-	return 0;
-}
-
 struct line_entry {
 	int start, end;
 	
@@ -118,7 +87,7 @@ int split_lines (struct img_dt src, unsigned char background, struct line_entry 
 	if (!num_lines)
 		return 0;
 	
-	struct line_entry *lines = calloc(sizeof(struct line_entry), num_lines);
+	struct line_entry *lines = calloc(sizeof(struct line_entry), num_lines + 1);
 	*out_lines = lines;
 	
 	for (pos = 0; pos < max; ) {
@@ -144,7 +113,46 @@ int split_lines (struct img_dt src, unsigned char background, struct line_entry 
 	return num_lines;
 }
 
+int flood_fill (struct img_dt src, int pos, unsigned char *find, 
+		unsigned char *rep, int threshold)
+{
+	if (pos < 0 || src.used[pos])
+		return -1;
+	
+	int i, total = 0;
+	for (i = 0; i < src.pixsz; i++) {
+		if (src.flat[pos + i] > find[i])
+			total += (src.flat[pos + i] - find[i]);
+		else
+			total += (find[i] - src.flat[pos + i]);
+	}
 
+	if (total <= (threshold * src.pixsz)) {
+		memcpy(&src.flat[pos], find, src.pixsz);
+		return -1;
+	}
+	
+	src.used[pos] = 1;
+	
+	memcpy(&src.flat[pos], rep, src.pixsz);
+	
+	flood_fill(src, index_flat(src, pos, 0, -1), find, rep, threshold);
+	flood_fill(src, index_flat(src, pos, 0,  1), find, rep, threshold);
+	flood_fill(src, index_flat(src, pos, -1, 0), find, rep, threshold);
+	flood_fill(src, index_flat(src, pos, 1,  0), find, rep, threshold);
+	
+	flood_fill(src, index_flat(src, pos, 1, -1), find, rep, threshold);
+	flood_fill(src, index_flat(src, pos, -1, 1), find, rep, threshold);
+	flood_fill(src, index_flat(src, pos, -1,-1), find, rep, threshold);
+	flood_fill(src, index_flat(src, pos, 1,  1), find, rep, threshold);
+	
+	return 0;
+}
+
+int split_letters (void)
+{
+	
+}
 
 int main (int argc, const char **argv)
 {
@@ -157,19 +165,27 @@ int main (int argc, const char **argv)
 	
 	int end = (src.x * src.y);
 	src.used = calloc(sizeof(char), src.x * src.y);
-	int pos = 0;
+	int i, pos = 0;
 	
-	for (pos = 0; pos < end; pos += src.pixsz)
-		flood_fill(src, pos, background, rep, 96);
+	for (pos = 0; pos < end; pos += src.pixsz) {
+		if (!flood_fill(src, pos, background, rep, 127)) {
+			printf("letter at pos %d\n", pos);
+			src.flat[pos+0] = 0x90;
+			src.flat[pos+1] = 0x10;
+			src.flat[pos+2] = 0x10;
+		}
+	}
 	
 	struct line_entry *lines;
 	int num_lines = split_lines(src, 0xFF, &lines);
 	
-	
-	int i;
-	
 	for (i = 0; i < num_lines; i++) {
 		printf("line %d: %d -> %d\n", i, lines[i].start, lines[i].end);
+		
+		int mid_line = (lines[i].end + lines[i].start) / 2;
+		mid_line *= src.x;
+		
+		memset(&src.flat[mid_line], 0x40, src.x);
 	}
 	
 	free(lines);
