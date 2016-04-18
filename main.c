@@ -197,11 +197,16 @@ int flood_cmp (struct img_dt src, int pos_src, int pos_dst,
 		int *missing_pixels, int threshold)
 {
 	if (pos_src < 0 || src.used[pos_src] || pos_dst < 0 || src.used[pos_dst])
-		return -1;
+		return 0;
+		
+	unsigned char background[4] = {0xFF, 0xFF, 0xFF, 0xFF};
 	
-	if (memcmp(&src.flat[pos_src], &src.flat[pos_dst], src.pixsz))
-		if (++(*missing_pixels) > threshold)
-			return -1;
+	if (memcmp(&src.flat[pos_src], &src.flat[pos_dst], src.pixsz)) {
+		if (memcmp(&src.flat[pos_src], background, src.pixsz))
+			if (++(*missing_pixels) > threshold)
+				return -1;			
+		return 0;
+	}
 	
 	src.used[pos_src] = 1;
 	src.used[pos_dst] = 1;
@@ -232,7 +237,40 @@ int flood_cmp (struct img_dt src, int pos_src, int pos_dst,
 			index_flat(src, pos_dst, 1,  1), 
 			missing_pixels, threshold);
 	
-	return *missing_pixels;
+	return (*missing_pixels > threshold) ? -1 : 0;
+}
+
+
+int flood_boundaries (struct img_dt src, int pos, unsigned char *find, 
+		int *x0, int *y0, int *x1, int *y1)
+{
+	if (pos < 0 || src.used[pos])
+		return -1;
+		
+	if (memcmp(&src.flat[pos], find, src.pixsz))
+		return -1;
+		
+	src.used[pos] = 1;
+	
+	int cx = (pos % src.x);
+	int cy = (pos / src.x);
+	
+	if (cx > *x1)		*x1 = cx;
+	if (cx < *x0)		*x0 = cx;
+	if (cy > *y1)		*y1 = cy;
+	if (cy < *y0)		*y0 = cy;
+
+	flood_boundaries(src, index_flat(src, pos, 0, -1), find, x0, y0, x1, y1);
+	flood_boundaries(src, index_flat(src, pos, 0,  1), find, x0, y0, x1, y1);
+	flood_boundaries(src, index_flat(src, pos, -1, 0), find, x0, y0, x1, y1);
+	flood_boundaries(src, index_flat(src, pos, 1,  0), find, x0, y0, x1, y1);
+	
+	flood_boundaries(src, index_flat(src, pos, 1, -1), find, x0, y0, x1, y1);
+	flood_boundaries(src, index_flat(src, pos, -1, 1), find, x0, y0, x1, y1);
+	flood_boundaries(src, index_flat(src, pos, -1,-1), find, x0, y0, x1, y1);
+	flood_boundaries(src, index_flat(src, pos, 1,  1), find, x0, y0, x1, y1);
+	
+	return 0;
 }
 
 
@@ -289,7 +327,7 @@ int main (int argc, const char **argv)
 		return -1;
 
 	src.used = calloc(sizeof(char), src.x * src.y);
-	int i, pos = 0;
+	int i, j, pos = 0;
 	
 	struct line_entry *lines;
 	int num_lines = split_lines(src, 0xFF, &lines);
@@ -311,10 +349,7 @@ int main (int argc, const char **argv)
 			src.flat[pos+2] = 0x10;
 	}
 	
-	
-	
 	for (i = 0; i < num_letters; i++) {
-		int j, res;
 		for (j = 0; j < num_letters; j++) {
 			if (i == j)
 				continue;
@@ -322,13 +357,20 @@ int main (int argc, const char **argv)
 			
 			memset(src.used, 0, src.x * src.y);
 			
-			if ((res = flood_cmp(src, letters[i], letters[j], 
-					&missing_pix, 4)) >= 0 && res < 4)
+			if (!flood_cmp(src, letters[i], letters[j], &missing_pix, 100))
 				printf("letter %d = letter %d\n", i, j);
 		}
 	
 		if (j == num_letters)
 			printf("done searching for ind %d\n", i);
+			
+			
+		int x0 = src.x, y0 = src.y, x1 = 0, y1 = 0;
+		memset(src.used, 0, src.x * src.y);
+		
+		flood_boundaries (src, letters[i], background, &x0, &y0, &x1, &y1);
+		
+		printf("(%d, %d) -> (%d, %d)\n", x0, y0, x1, y1);
 	}
 	
 	free(lines);
