@@ -149,9 +149,41 @@ int flood_fill (struct img_dt src, int pos, unsigned char *find,
 	return 0;
 }
 
-int split_letters (void)
+int fill_lines (struct img_dt src, struct line_entry *lines, int num_lines, unsigned char *background, unsigned char *rep)
 {
+	int last_mid_line, mid_line, i, pos;
+	int end = (src.x * src.y);
 	
+	mid_line = last_mid_line = 0;
+	
+	for (i = 0; i < num_lines; i++) {
+		printf("line %d: %d -> %d\n", i, lines[i].start, lines[i].end);
+		
+		last_mid_line = mid_line + (5 * src.x);
+		mid_line = src.x * ((lines[i].end + lines[i].start) / 2);
+		
+		memset(&src.flat[mid_line], 0x40, src.x);
+
+		for (pos = last_mid_line; pos < mid_line; pos += src.pixsz) {
+			if (!flood_fill(src, pos, background, rep, 127)) {
+				printf("letter at pos %d\n", pos);
+				src.flat[pos+0] = 0x90;
+				src.flat[pos+1] = 0x10;
+				src.flat[pos+2] = 0x10;
+			}
+		}
+	}
+	
+	for (pos = mid_line + src.x; pos < end; pos += src.pixsz) {
+		if (!flood_fill(src, pos, background, rep, 127)) {
+			printf("letter at pos %d\n", pos);
+			src.flat[pos+0] = 0x90;
+			src.flat[pos+1] = 0x10;
+			src.flat[pos+2] = 0x10;
+		}
+	}
+	
+	return 0;
 }
 
 int main (int argc, const char **argv)
@@ -167,7 +199,35 @@ int main (int argc, const char **argv)
 	src.used = calloc(sizeof(char), src.x * src.y);
 	int i, pos = 0;
 	
-	for (pos = 0; pos < end; pos += src.pixsz) {
+	
+	struct line_entry *lines;
+	int num_lines = split_lines(src, 0xFF, &lines);
+	
+	fill_lines(src, lines, num_lines, background, rep);
+	/*
+	int last_mid_line, mid_line;
+	
+	mid_line = last_mid_line = 0;
+	
+	for (i = 0; i < num_lines; i++) {
+		printf("line %d: %d -> %d\n", i, lines[i].start, lines[i].end);
+		
+		last_mid_line = mid_line + (5 * src.x);
+		mid_line = src.x * ((lines[i].end + lines[i].start) / 2);
+		
+		memset(&src.flat[mid_line], 0x40, src.x);
+
+		for (pos = last_mid_line; pos < mid_line; pos += src.pixsz) {
+			if (!flood_fill(src, pos, background, rep, 127)) {
+				printf("letter at pos %d\n", pos);
+				src.flat[pos+0] = 0x90;
+				src.flat[pos+1] = 0x10;
+				src.flat[pos+2] = 0x10;
+			}
+		}
+	}
+	
+	for (pos = mid_line + src.x; pos < end; pos += src.pixsz) {
 		if (!flood_fill(src, pos, background, rep, 127)) {
 			printf("letter at pos %d\n", pos);
 			src.flat[pos+0] = 0x90;
@@ -175,19 +235,7 @@ int main (int argc, const char **argv)
 			src.flat[pos+2] = 0x10;
 		}
 	}
-	
-	struct line_entry *lines;
-	int num_lines = split_lines(src, 0xFF, &lines);
-	
-	for (i = 0; i < num_lines; i++) {
-		printf("line %d: %d -> %d\n", i, lines[i].start, lines[i].end);
-		
-		int mid_line = (lines[i].end + lines[i].start) / 2;
-		mid_line *= src.x;
-		
-		memset(&src.flat[mid_line], 0x40, src.x);
-	}
-	
+*/
 	free(lines);
 	
 	if (stbi_write_png("/Users/nobody1/Desktop/out.png", src.x / src.pixsz, src.y, 
