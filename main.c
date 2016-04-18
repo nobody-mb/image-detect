@@ -247,8 +247,8 @@ int flood_boundaries (struct img_dt src, int pos, unsigned char *find,
 	if (pos < 0 || src.used[pos])
 		return -1;
 		
-	if (memcmp(&src.flat[pos], find, src.pixsz))
-		return -1;
+	if (!memcmp(&src.flat[pos], find, src.pixsz))
+		return -1;	/* find = background */
 		
 	src.used[pos] = 1;
 	
@@ -363,7 +363,6 @@ int main (int argc, const char **argv)
 	
 		if (j == num_letters)
 			printf("done searching for ind %d\n", i);
-			
 			
 		int x0 = src.x, y0 = src.y, x1 = 0, y1 = 0;
 		memset(src.used, 0, src.x * src.y);
