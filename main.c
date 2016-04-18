@@ -19,19 +19,19 @@ struct img_dt {
 	unsigned char *used;
 };
 
-int alloc_img_from_file (const char *fname, struct img_dt *ptr, int expect_size)
+int alloc_img_from_file (const char *name, struct img_dt *ptr, int expect_size)
 {
-	unsigned char *buffer = stbi_load(fname, &ptr->x, &ptr->y, &ptr->pixsz, 0);
+	unsigned char *buf = stbi_load(name, &ptr->x, &ptr->y, &ptr->pixsz, 0);
 	
 	ptr->x *= ptr->pixsz;
 	
 	ptr->flat = malloc(ptr->y * ptr->x);
-	memcpy(ptr->flat, buffer, ptr->y * ptr->x);
+	memcpy(ptr->flat, buf, ptr->y * ptr->x);
 	
-    	stbi_image_free(buffer);
+    	stbi_image_free(buf);
 	
 	fprintf(stderr, "alloc image %s (%d x %d) pixsz = %d\n", 
-		fname, ptr->x, ptr->y, ptr->pixsz);
+		name, ptr->x, ptr->y, ptr->pixsz);
 	
 	return 0;
 }
@@ -47,101 +47,59 @@ int index_flat (struct img_dt src, int pos, int dx, int dy)
 	return (src.x * (cy + dy)) + (cx + (dx * src.pixsz));
 }
 
-int test_pixel (struct img_dt src, int pos, unsigned char *cmp, int dx, int dy)
+int flood_fill (struct img_dt src, int pos, unsigned char *find, 
+		unsigned char *rep, int threshold)
 {
-	int new_ind;
-
-	if ((new_ind = index_flat(src, pos, dx, dy)) < 0)
+	if (pos < 0 || src.used[pos])
 		return -1;
 	
-	printf("cmp old %d to new %d\n", pos, new_ind);
+	int i, total = 0;
+	for (i = 0; i < src.pixsz; i++) {
+		if (src.flat[pos + i] > find[i])
+			total += (src.flat[pos + i] - find[i]);
+		else
+			total += (find[i] - src.flat[pos + i]);
+	}
+
+	if (total <= (threshold * src.pixsz)) {
+		memcpy(&src.flat[pos], find, src.pixsz);
+		return -1;
+	}
 	
-	return !!(memcmp(&src.flat[new_ind], cmp, src.pixsz));
+	src.used[pos] = 1;
+	
+	memcpy(&src.flat[pos], rep, src.pixsz);
+	
+	flood_fill(src, index_flat(src, pos, 0, -1), find, rep, threshold);
+	flood_fill(src, index_flat(src, pos, 0,  1), find, rep, threshold);
+	flood_fill(src, index_flat(src, pos, -1, 0), find, rep, threshold);
+	flood_fill(src, index_flat(src, pos, 1,  0), find, rep, threshold);
+	
+	return 0;
 }
 
 int main (int argc, const char **argv)
 {
 	struct img_dt src;
+	unsigned char background[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+	unsigned char rep[4] = {0x20, 0x99, 0x99, 0x99};
 	
 	if (alloc_img_from_file("/Users/nobody1/Desktop/test.png", &src, 0))
 		return -1;
 	
 	int end = (src.x * src.y);
-	int state = 0;
 	src.used = calloc(sizeof(char), src.x * src.y);
 	int pos = 0;
-	int up, dn, left, right, center;
 	
-	unsigned char background[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+	for (pos = 0; pos < end; pos += src.pixsz)
+		flood_fill(src, pos, background, rep, 96);
 	
-	int x1 = 0, y1 = 0;
-	int x0 = src.x, y0 = src.y;
-	
-	int cx = 0, cy = 0;
-	
-	while (pos < end) {
-		if ((center = test_pixel(src, pos, background, 0, 0)))
-			state = 1;
-		
-		up = test_pixel(src, pos, background, 0, -1);
-		dn = test_pixel(src, pos, background, 0, 1);
-		left = test_pixel(src, pos, background, -1, 0);
-		right = test_pixel(src, pos, background, 1, 0);
-
-		if (!up && !dn && !left && !right && !center) {
-			if (state)
-				break;
-		} else {
-			if (center && x0 > cx)
-				x0 = cx;
-			if (center && x1 < cx)
-				x1 = cx;
-			
-			if (center && y0 > cy)
-				y0 = cy;
-			if (center && y1 < cy)
-				y1 = cy;
-			
-			if (left && x0 > (cx - 1))
-				x0 = cx - 1;
-			
-			if (right && x1 < (cx + 1))
-				x1 = cx + 1;
-			
-			if (dn && y0 > (cy - 1))
-				y0 = cy - 1;
-			
-			if (up && y1 < (cy + 1))
-				y1 = cy + 1;
-		}
-			
-		pos += src.pixsz;
-		src.used[pos] = 1;
-		
-		printf("(%d, %d): %d, up %d dn %d left %d right %d\n", cx, cy, center, up, dn, left, right);
-		
-		cx += src.pixsz;
-		if (cx >= src.x) {
-			cx = 0;
-			cy++;
-		}
-	}
-	
+	if (stbi_write_png("/Users/nobody1/Desktop/out.png", src.x / src.pixsz, src.y, 
+			   src.pixsz, src.flat, src.x) < 0)
+		printf("error writing\n");
 	
 	free(src.flat);
 	free(src.used);
 	
-	printf("(%d, %d) -> (%d, %d)\n", x0, y0, x1, y1);
-	
 	return 0;
 }
-
-/*
- 
- 
- (-1, 10) -> (111, 12)
- (183 x 30)
-
- 
- 
- */
