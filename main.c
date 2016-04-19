@@ -413,7 +413,7 @@ int main (int argc, const char **argv)
 			if (i == j)	continue;
 			int k = cmp_letters(src, glyphs[i], glyphs[j]);
 			
-			if (k >= 0 && k < (4 * src.pixsz)) 
+			if (k >= 0 && k < (2 * src.pixsz)) 
 				printf("letter %d = letter %d\n", i, j);
 		
 		}
