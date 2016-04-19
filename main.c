@@ -200,55 +200,6 @@ int flood_fill (struct img_dt src, int pos, unsigned char *find,
 	return 0;
 }
 
-int flood_cmp (struct img_dt src, int pos_src, int pos_dst, int threshold)
-{
-	unsigned char background[4] = {0xFF, 0xFF, 0xFF, 0xFF};
-	struct queue cmp_queue;
-	int missing_pixels = 0;
-	int s, d;
-	
-	if (pos_src < 0 || src.used[pos_src] || pos_dst < 0 || src.used[pos_dst])
-		return 0;
-		
-	memset(&cmp_queue, 0, sizeof(struct queue));
-	
-	push(&cmp_queue, pos_src);
-	push(&cmp_queue, pos_dst);
-	
-	while (cmp_queue.size) {
-		pos_src = pop(&cmp_queue);
-		pos_dst = pop(&cmp_queue);
-		
-		if (src.used[pos_src] || src.used[pos_dst])
-			continue;
-
-		if (!memcmp(&src.flat[pos_src], background, src.pixsz))
-			continue;
-		
-		
-		src.used[pos_src] = 1;
-		src.used[pos_dst] = 1;
-		
-		if (memcmp(&src.flat[pos_src], &src.flat[pos_dst], src.pixsz)) {
-			if (++missing_pixels > threshold)
-				break;
-		}
-
-		for (s = -1; s <= 1; s++) {
-			for (d = -1; d <= 1; d++) {
-				if (!s && !d) continue;
-				push(&cmp_queue,index_flat(src, pos_src, s, d));
-				push(&cmp_queue,index_flat(src, pos_dst, s, d));
-			}
-		}
-	}
-	
-	while (cmp_queue.size)
-		pop(&cmp_queue);
-	
-	return (missing_pixels > threshold) ? -1 : 0;
-}
-
 
 int flood_boundaries (struct img_dt src, int pos, unsigned char *find, 
 		int *x0, int *y0, int *x1, int *y1)
@@ -270,10 +221,11 @@ int flood_boundaries (struct img_dt src, int pos, unsigned char *find,
 	push(&cmp_queue, pos);
 	
 	while (cmp_queue.size) {
-		pos = pop(&cmp_queue);
-		
-		if (pos < 0 || src.used[pos] || !memcmp(&src.flat[pos], find, src.pixsz))
+		if ((pos = pop(&cmp_queue)) < 0 || src.used[pos])
 			continue;	
+			
+		if (!memcmp(&src.flat[pos], find, src.pixsz))
+			continue;
 			
 		src.used[pos] = 1;
 	
@@ -341,6 +293,81 @@ int fill_lines (struct img_dt src, struct line_entry *lines, int num_lines,
 	return num_letters;
 }
 
+int flood_cmp (struct img_dt src, int pos_src, int pos_dst, int threshold)
+{
+	unsigned char background[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+	struct queue cmp_queue;
+	int missing_pixels = 0;
+	int s, d;
+	
+	if (pos_src < 0 || src.used[pos_src] || pos_dst < 0 || src.used[pos_dst])
+		return 0;
+		
+	memset(&cmp_queue, 0, sizeof(struct queue));
+	
+	push(&cmp_queue, pos_src);
+	push(&cmp_queue, pos_dst);
+	
+	while (cmp_queue.size) {
+		pos_src = pop(&cmp_queue);
+		pos_dst = pop(&cmp_queue);
+		
+		if (src.used[pos_src] || src.used[pos_dst])
+			continue;
+
+		if (!memcmp(&src.flat[pos_src], background, src.pixsz))
+			continue;
+		
+		
+		src.used[pos_src] = 1;
+		src.used[pos_dst] = 1;
+		
+		if (memcmp(&src.flat[pos_src], &src.flat[pos_dst], src.pixsz)) {
+			if (++missing_pixels > threshold)
+				break;
+		}
+
+		for (s = -1; s <= 1; s++) {
+			for (d = -1; d <= 1; d++) {
+				if (!s && !d) continue;
+				push(&cmp_queue,index_flat(src, pos_src, s, d));
+				push(&cmp_queue,index_flat(src, pos_dst, s, d));
+			}
+		}
+	}
+	
+	while (cmp_queue.size)
+		pop(&cmp_queue);
+	
+	return (missing_pixels > threshold) ? -1 : 0;
+}
+
+int cmp_letters (struct img_dt src, struct letter_data l1, struct letter_data l2)
+{
+	int l1_x = l1.x1 - l1.x0;
+	int l1_y = l1.y1 - l1.y0;
+	int l2_x = l2.x1 - l2.x0;
+	int l2_y = l2.y1 - l2.y0;
+	int total_missed = 0;
+	
+	if (l1_x < 0 || l1_y < 0 || l2_x != l1_x || l2_y != l1_y)
+		return -1;
+
+	int i, j;
+	for (i = 0; i < l1_y; i++) {
+		for (j = 0; j < l1_x; j++) {
+			int l1c = l1.buf_pos + (i * src.y) + j;
+			int l2c = l2.buf_pos + (i * src.y) + j;
+			
+			if (src.flat[l1c] != src.flat[l2c])
+				++total_missed;
+		
+		}
+	}
+	
+	return total_missed;
+}
+
 int main (int argc, const char **argv)
 {
 	struct img_dt src;
@@ -367,12 +394,11 @@ int main (int argc, const char **argv)
 	struct letter_data *glyphs = calloc(sizeof(struct letter_data), num_letters + 1);
 	
 	for (i = 0; i < num_letters; i++) {
-		pos = letters[i];
-		
+		glyphs[i].buf_pos = pos = letters[i];
+
 		printf("letter at pos %d\n", pos);
-			src.flat[pos+0] = 0x90;
-			src.flat[pos+1] = 0x10;
-			src.flat[pos+2] = 0x10;
+		src.flat[pos+0] = 0x90;
+		src.flat[pos+2] = src.flat[pos+1] = 0x10;
 
 		flood_boundaries (src, letters[i], background, 
 				&(glyphs[i].x0), &(glyphs[i].y0), 
@@ -380,7 +406,17 @@ int main (int argc, const char **argv)
 		
 		printf("(%d, %d) -> (%d, %d)\n", glyphs[i].x0, glyphs[i].y0, 
 			glyphs[i].x1, glyphs[i].y1);
+	}
+	
+	for (i = 0; i < num_letters; i++) {
+		for (j = 0; j < num_letters; j++) {
+			if (i == j)	continue;
+			int k = cmp_letters(src, glyphs[i], glyphs[j]);
+			
+			if (k >= 0 && k < (4 * src.pixsz)) 
+				printf("letter %d = letter %d\n", i, j);
 		
+		}
 	}
 	
 	free(lines);
