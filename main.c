@@ -100,66 +100,43 @@ int pop (struct queue *queue)
 	return item;
 }
 
-
-int split_lines (struct img_dt src, unsigned char background, struct line_entry **out_lines)
+int split_state (int max, unsigned char *flat, unsigned char background, 
+		int row_len, struct line_entry *lines)
 {
-	int cur_y = 0;
-	int pos = 0, max = src.x * src.y;
-	int state = 0;
-	int line_no = 0;
-	int num_lines = 0;
-	struct line_entry *lines;
+	int pos = 0, cur_y = 0, num_lines = 0, state = 0;
+	unsigned char *bg_line = calloc(max + 1, sizeof(char));
 	
-	unsigned char *bg_line = calloc(src.x + 1, sizeof(char));
+	memset(bg_line, background, row_len);
 	
-	memset(bg_line, background, src.x);
-	
-	for (pos = 0; pos < max; ) {
-		if (!memcmp(&src.flat[pos], bg_line, src.x)) {
-			if (state == 0) {
-				state = 1;
-			}
+	for (pos = 0; pos < max; pos += row_len, cur_y++) {
+		if (!memcmp(&flat[pos], bg_line, row_len)) {
+			if (state) continue;
+			state = 1;
+			if (lines) lines[num_lines].start = cur_y;
 		} else {
-			if (state == 1) {
-				num_lines++;
-				state = 0;
-			} 
+			if (!state) continue;
+			if (lines) lines[num_lines].end = cur_y;
+			num_lines++;
+			state = 0;
 		}
-		
-		cur_y++;
-		pos += src.x;
-	}
-	
-	cur_y = 0;
-	state = 0;
-	pos = 0;
-	
-	if (!num_lines) {
-		free(bg_line);
-		return 0;
-	}
-	
-	*out_lines = lines = calloc(sizeof(struct line_entry), num_lines + 1);
-
-	for (pos = 0; pos < max; ) {
-		if (!memcmp(&src.flat[pos], bg_line, src.x)) {
-			if (state == 0) {
-				state = 1;
-				lines[line_no].start = cur_y;
-			} 
-		} else {
-			if (state == 1) {
-				lines[line_no].end = cur_y;
-				line_no++;
-				state = 0;
-			} 
-		}
-		
-		cur_y++;
-		pos += src.x;
 	}
 	
 	free(bg_line);
+
+	return num_lines;
+}
+
+int split_lines (struct img_dt src, unsigned char background, 
+		struct line_entry **out_lines)
+{
+	int num_lines;
+
+	if (!(num_lines = split_state(src.x * src.y, src.flat, background, src.x, NULL)))
+		return 0;
+	
+	*out_lines = calloc(sizeof(struct line_entry), num_lines + 1);
+	
+	split_state(src.x * src.y, src.flat, background, src.x, *out_lines);
 	
 	return num_lines;
 }
