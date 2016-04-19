@@ -19,6 +19,12 @@ struct img_dt {
 	unsigned char *used;
 };
 
+struct letter_data {
+	int buf_pos;
+	int x0, y0;
+	int x1, y1;
+};
+
 int alloc_img_from_file (const char *name, struct img_dt *ptr, int expect_size)
 {
 	unsigned char *buf = stbi_load(name, &ptr->x, &ptr->y, &ptr->pixsz, 0);
@@ -102,6 +108,7 @@ int split_lines (struct img_dt src, unsigned char background, struct line_entry 
 	int state = 0;
 	int line_no = 0;
 	int num_lines = 0;
+	struct line_entry *lines;
 	
 	unsigned char *bg_line = calloc(src.x + 1, sizeof(char));
 	
@@ -127,12 +134,13 @@ int split_lines (struct img_dt src, unsigned char background, struct line_entry 
 	state = 0;
 	pos = 0;
 	
-	if (!num_lines)
+	if (!num_lines) {
+		free(bg_line);
 		return 0;
+	}
 	
-	struct line_entry *lines = calloc(sizeof(struct line_entry), num_lines + 1);
-	*out_lines = lines;
-	
+	*out_lines = lines = calloc(sizeof(struct line_entry), num_lines + 1);
+
 	for (pos = 0; pos < max; ) {
 		if (!memcmp(&src.flat[pos], bg_line, src.x)) {
 			if (state == 0) {
@@ -192,83 +200,99 @@ int flood_fill (struct img_dt src, int pos, unsigned char *find,
 	return 0;
 }
 
-
-int flood_cmp (struct img_dt src, int pos_src, int pos_dst, 
-		int *missing_pixels, int threshold)
+int flood_cmp (struct img_dt src, int pos_src, int pos_dst, int threshold)
 {
+	unsigned char background[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+	struct queue cmp_queue;
+	int missing_pixels = 0;
+	int s, d;
+	
 	if (pos_src < 0 || src.used[pos_src] || pos_dst < 0 || src.used[pos_dst])
 		return 0;
 		
-	unsigned char background[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+	memset(&cmp_queue, 0, sizeof(struct queue));
 	
-	if (memcmp(&src.flat[pos_src], &src.flat[pos_dst], src.pixsz)) {
-		if (memcmp(&src.flat[pos_src], background, src.pixsz))
-			if (++(*missing_pixels) > threshold)
-				return -1;			
-		return 0;
+	push(&cmp_queue, pos_src);
+	push(&cmp_queue, pos_dst);
+	
+	while (cmp_queue.size) {
+		pos_src = pop(&cmp_queue);
+		pos_dst = pop(&cmp_queue);
+		
+		if (src.used[pos_src] || src.used[pos_dst])
+			continue;
+
+		if (!memcmp(&src.flat[pos_src], background, src.pixsz))
+			continue;
+		
+		
+		src.used[pos_src] = 1;
+		src.used[pos_dst] = 1;
+		
+		if (memcmp(&src.flat[pos_src], &src.flat[pos_dst], src.pixsz)) {
+			if (++missing_pixels > threshold)
+				break;
+		}
+
+		for (s = -1; s <= 1; s++) {
+			for (d = -1; d <= 1; d++) {
+				if (!s && !d) continue;
+				push(&cmp_queue,index_flat(src, pos_src, s, d));
+				push(&cmp_queue,index_flat(src, pos_dst, s, d));
+			}
+		}
 	}
 	
-	src.used[pos_src] = 1;
-	src.used[pos_dst] = 1;
+	while (cmp_queue.size)
+		pop(&cmp_queue);
 	
-	flood_cmp(src,  index_flat(src, pos_src, 0, -1), 
-			index_flat(src, pos_dst, 0, -1), 
-			missing_pixels, threshold);
-	flood_cmp(src,  index_flat(src, pos_src, 0,  1), 
-			index_flat(src, pos_dst, 0,  1), 
-			missing_pixels, threshold);
-	flood_cmp(src,  index_flat(src, pos_src, -1, 0), 
-			index_flat(src, pos_dst, -1, 0), 
-			missing_pixels, threshold);
-	flood_cmp(src,  index_flat(src, pos_src, 1,  0), 
-			index_flat(src, pos_dst, 1,  0), 
-			missing_pixels, threshold);
-	
-	flood_cmp(src,  index_flat(src, pos_src, 1, -1), 
-			index_flat(src, pos_dst, 1, -1), 
-			missing_pixels, threshold);
-	flood_cmp(src,  index_flat(src, pos_src, -1, 1), 
-			index_flat(src, pos_dst, -1, 1), 
-			missing_pixels, threshold);
-	flood_cmp(src,  index_flat(src, pos_src, -1,-1), 
-			index_flat(src, pos_dst, -1,-1), 
-			missing_pixels, threshold);
-	flood_cmp(src,  index_flat(src, pos_src, 1,  1), 
-			index_flat(src, pos_dst, 1,  1), 
-			missing_pixels, threshold);
-	
-	return (*missing_pixels > threshold) ? -1 : 0;
+	return (missing_pixels > threshold) ? -1 : 0;
 }
 
 
 int flood_boundaries (struct img_dt src, int pos, unsigned char *find, 
 		int *x0, int *y0, int *x1, int *y1)
-{
+{				
+	struct queue cmp_queue;
+	int s, d, cx, cy;
+	
+	memset(src.used, 0, src.x * src.y);
+	
+	*x0 = src.x;
+	*y0 = src.y;
+	*x1 = *y1 = 0;
+	
 	if (pos < 0 || src.used[pos])
 		return -1;
 		
-	if (!memcmp(&src.flat[pos], find, src.pixsz))
-		return -1;	/* find = background */
-		
-	src.used[pos] = 1;
-	
-	int cx = (pos % src.x);
-	int cy = (pos / src.x);
-	
-	if (cx > *x1)		*x1 = cx;
-	if (cx < *x0)		*x0 = cx;
-	if (cy > *y1)		*y1 = cy;
-	if (cy < *y0)		*y0 = cy;
+	memset(&cmp_queue, 0, sizeof(struct queue));
 
-	flood_boundaries(src, index_flat(src, pos, 0, -1), find, x0, y0, x1, y1);
-	flood_boundaries(src, index_flat(src, pos, 0,  1), find, x0, y0, x1, y1);
-	flood_boundaries(src, index_flat(src, pos, -1, 0), find, x0, y0, x1, y1);
-	flood_boundaries(src, index_flat(src, pos, 1,  0), find, x0, y0, x1, y1);
+	push(&cmp_queue, pos);
 	
-	flood_boundaries(src, index_flat(src, pos, 1, -1), find, x0, y0, x1, y1);
-	flood_boundaries(src, index_flat(src, pos, -1, 1), find, x0, y0, x1, y1);
-	flood_boundaries(src, index_flat(src, pos, -1,-1), find, x0, y0, x1, y1);
-	flood_boundaries(src, index_flat(src, pos, 1,  1), find, x0, y0, x1, y1);
+	while (cmp_queue.size) {
+		pos = pop(&cmp_queue);
+		
+		if (pos < 0 || src.used[pos] || !memcmp(&src.flat[pos], find, src.pixsz))
+			continue;	
+			
+		src.used[pos] = 1;
+	
+		cx = (pos % src.x);
+		cy = (pos / src.x);
+		
+		if (cx > *x1)	*x1 = cx;
+		if (cx < *x0)	*x0 = cx;
+		if (cy > *y1)	*y1 = cy;
+		if (cy < *y0)	*y0 = cy;
+		
+		for (s = -1; s <= 1; s++)
+			for (d = -1; d <= 1; d++)
+				if (s || d)
+					push(&cmp_queue, index_flat(src, pos, s, d));
+	}
+	
+	while (cmp_queue.size)
+		pop(&cmp_queue);
 	
 	return 0;
 }
@@ -339,6 +363,8 @@ int main (int argc, const char **argv)
 	int num_letters;
 	
 	num_letters = fill_lines(src, lines, num_lines, background, rep, &letters);
+
+	struct letter_data *glyphs = calloc(sizeof(struct letter_data), num_letters + 1);
 	
 	for (i = 0; i < num_letters; i++) {
 		pos = letters[i];
@@ -347,33 +373,19 @@ int main (int argc, const char **argv)
 			src.flat[pos+0] = 0x90;
 			src.flat[pos+1] = 0x10;
 			src.flat[pos+2] = 0x10;
-	}
-	
-	for (i = 0; i < num_letters; i++) {
-		for (j = 0; j < num_letters; j++) {
-			if (i == j)
-				continue;
-			int missing_pix = 0;
-			
-			memset(src.used, 0, src.x * src.y);
-			
-			if (!flood_cmp(src, letters[i], letters[j], &missing_pix, 100))
-				printf("letter %d = letter %d\n", i, j);
-		}
-	
-		if (j == num_letters)
-			printf("done searching for ind %d\n", i);
-			
-		int x0 = src.x, y0 = src.y, x1 = 0, y1 = 0;
-		memset(src.used, 0, src.x * src.y);
+
+		flood_boundaries (src, letters[i], background, 
+				&(glyphs[i].x0), &(glyphs[i].y0), 
+				&(glyphs[i].x1), &(glyphs[i].y1));
 		
-		flood_boundaries (src, letters[i], background, &x0, &y0, &x1, &y1);
+		printf("(%d, %d) -> (%d, %d)\n", glyphs[i].x0, glyphs[i].y0, 
+			glyphs[i].x1, glyphs[i].y1);
 		
-		printf("(%d, %d) -> (%d, %d)\n", x0, y0, x1, y1);
 	}
 	
 	free(lines);
 	free(letters);
+	free(glyphs);
 	
 	if (stbi_write_png("/Users/nobody1/Desktop/out.png", src.x / src.pixsz, src.y, 
 			   src.pixsz, src.flat, src.x) < 0)
