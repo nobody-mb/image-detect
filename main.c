@@ -36,8 +36,8 @@ int alloc_img_from_file (const char *name, struct img_dt *ptr, int expect_size)
 	
     	stbi_image_free(buf);
 	
-	fprintf(stderr, "alloc image %s (%d x %d) pixsz = %d\n", 
-		name, ptr->x, ptr->y, ptr->pixsz);
+	//fprintf(stderr, "alloc image %s (%d x %d) pixsz = %d\n", 
+	//	name, ptr->x, ptr->y, ptr->pixsz);
 	
 	return 0;
 }
@@ -209,10 +209,10 @@ int flood_boundaries (struct img_dt src, int pos, unsigned char *find,
 		cx = (pos % src.x);
 		cy = (pos / src.x);
 		
-		if (cx > *x1)	*x1 = cx;
-		if (cx < *x0)	*x0 = cx;
-		if (cy > *y1)	*y1 = cy;
-		if (cy < *y0)	*y0 = cy;
+		if (cx >= *x1)	*x1 = cx;
+		if (cx <= *x0)	*x0 = cx;
+		if (cy >= *y1)	*y1 = cy;
+		if (cy <= *y0)	*y0 = cy;
 		
 		for (s = -1; s <= 1; s++)
 			for (d = -1; d <= 1; d++)
@@ -333,8 +333,8 @@ int cmp_letters (struct img_dt src, struct letter_data l1, struct letter_data l2
 	int i, j;
 	for (i = 0; i < l1_y; i++) {
 		for (j = 0; j < l1_x; j++) {
-			int l1c = l1.buf_pos + (i * src.y) + j;
-			int l2c = l2.buf_pos + (i * src.y) + j;
+			int l1c = l1.buf_pos + (i * src.x) + j;
+			int l2c = l2.buf_pos + (i * src.x) + j;
 			
 			if (src.flat[l1c] != src.flat[l2c])
 				++total_missed;
@@ -343,6 +343,56 @@ int cmp_letters (struct img_dt src, struct letter_data l1, struct letter_data l2
 	}
 	
 	return total_missed;
+}
+
+int cmp_letters_multiple (struct img_dt src, struct letter_data l1, 
+			struct img_dt letter, struct letter_data l2)
+{
+	int l1_x = l1.x1 - l1.x0;
+	int l1_y = l1.y1 - l1.y0;
+	int l2_x = l2.x1 - l2.x0;
+	int l2_y = l2.y1 - l2.y0;
+	int total_missed = 0;
+
+	if (l1_x < 0 || l1_y < 0)// || l2_x > l1_x || l2_y > l1_y)
+		return -1;
+
+	int i, j;
+	for (i = 0; i < l1_y; i++) {
+		for (j = 0; j < l1_x; j++) {
+			int l1c = ((l1.y0 + i) * src.x) + (j + l1.x0);
+			int l2c = (i * letter.x) + j;
+			
+			if (src.flat[l1c] != letter.flat[l2c])
+				++total_missed;
+		
+		}
+	}
+	
+	return total_missed;
+}
+
+
+int save_letter (struct img_dt src, struct letter_data l1, int index)
+{				
+	int l1_x = l1.x1 - l1.x0;
+	int l1_y = l1.y1 - l1.y0;
+
+	int i, retn = 0;
+	char wpath[1024];
+	unsigned char *buf = calloc(sizeof(char), (l1_x * l1_y) + 1);
+	
+	memset(wpath, 0, sizeof(wpath));
+	snprintf(wpath, sizeof(wpath), "/Users/nobody1/Desktop/letters/%d.png", index);
+	
+	for (i = 0; i < l1_y; i++)
+		memcpy(buf + (i * l1_x), &src.flat[((l1.y0 + i) * src.x) + l1.x0], l1_x);		
+		
+	retn = stbi_write_png(wpath, l1_x / src.pixsz, l1_y, src.pixsz, buf, l1_x);
+
+	free(buf);
+	
+	return retn;
 }
 
 int main (int argc, const char **argv)
@@ -380,20 +430,62 @@ int main (int argc, const char **argv)
 		flood_boundaries (src, letters[i], background, 
 				&(glyphs[i].x0), &(glyphs[i].y0), 
 				&(glyphs[i].x1), &(glyphs[i].y1));
+				
+		//glyphs[i].x0-=src.pixsz;
+		//glyphs[i].y0-=1;
+		
+		glyphs[i].x1+=src.pixsz;
+		glyphs[i].y1+=1;
 		
 		printf("(%d, %d) -> (%d, %d)\n", glyphs[i].x0, glyphs[i].y0, 
 			glyphs[i].x1, glyphs[i].y1);
+			
+		//if (save_letter(src, glyphs[i], i) < 0)
+		//	printf("error saving %d\n", i);
 	}
 	
+	
+	
 	for (i = 0; i < num_letters; i++) {
-		for (j = 0; j < num_letters; j++) {
-			if (i == j)	continue;
-			int k = cmp_letters(src, glyphs[i], glyphs[j]);
-			
-			if (k >= 0 && k < (2 * src.pixsz)) 
-				printf("letter %d = letter %d\n", i, j);
+		DIR *dr;
+		char wpath[1024];
+		struct letter_data l2;
+		struct img_dt letter_dt;
+		struct stat st;
+		struct dirent *ds;
 		
+		if ((dr = opendir("/Users/nobody1/Desktop/letters")) == NULL)
+			return -1;
+			
+		while ((ds = readdir(dr))) {
+			memset(&letter_dt, 0, sizeof(struct img_dt));
+			memset(&l2, 0, sizeof(struct letter_data));
+			if (*(ds->d_name) == '.') continue;
+
+			memset(wpath, 0, sizeof(wpath));
+			snprintf(wpath, sizeof(wpath), 
+				"/Users/nobody1/Desktop/letters/%s", ds->d_name);
+			
+			if (stat(wpath, &st) < 0) continue;
+				
+			if (S_ISDIR(st.st_mode)) continue;
+			
+			if (alloc_img_from_file(wpath, &letter_dt, 0)) continue;
+				
+			l2.x0 = l2.y0 = 0;
+			l2.x1 = letter_dt.x;
+			l2.y1 = letter_dt.y;
+				
+			int k = cmp_letters_multiple(src, glyphs[i], letter_dt, l2);
+			
+			if (k >= 0 && k < (8 * src.pixsz)) 
+				printf("letter %d = %s\n", i, ds->d_name);
+			
+			free(letter_dt.flat);
 		}
+		
+		closedir(dr);
+		
 	}
 	
 	free(lines);
