@@ -351,24 +351,24 @@ int cmp_letters_multiple (struct img_dt src, struct letter_data l1,
 	int l1_x = l1.x1 - l1.x0;
 	int l1_y = l1.y1 - l1.y0;
 	int l2_x = l2.x1 - l2.x0;
-	int l2_y = l2.y1 - l2.y0;
+	int l2_y = l2.y1 - l2.y0;	
 	int total_missed = 0;
 
-	if (l1_x < 0 || l1_y < 0)// || l2_x > l1_x || l2_y > l1_y)
+	if (l1_x < 0 || l1_y < 0 || l2_x != l1_x || l2_y != l1_y)
 		return -1;
-
-	int i, j;
-	for (i = 0; i < l1_y; i++) {
-		for (j = 0; j < l1_x; j++) {
-			int l1c = ((l1.y0 + i) * src.x) + (j + l1.x0);
-			int l2c = (i * letter.x) + j;
-			
-			if (src.flat[l1c] != letter.flat[l2c])
-				++total_missed;
-		
-		}
-	}
 	
+	int letter_pos = 0;
+	int i, j;
+	
+	for (i = l1.y0; i < l1.y1; i++)
+		for (j = l1.x0; j < l1.x1; j++)
+			if (src.flat[(i * src.x) + j] != 0xFF && 
+			 src.flat[(i * src.x) + j] != 
+			 letter.flat[((i - l1.y0) * src.x) + (j - l1.x0)])
+				++total_missed;
+
+	
+				 
 	return total_missed;
 }
 
@@ -430,18 +430,12 @@ int main (int argc, const char **argv)
 		flood_boundaries (src, letters[i], background, 
 				&(glyphs[i].x0), &(glyphs[i].y0), 
 				&(glyphs[i].x1), &(glyphs[i].y1));
-				
-		//glyphs[i].x0-=src.pixsz;
-		//glyphs[i].y0-=1;
-		
-		glyphs[i].x1+=src.pixsz;
-		glyphs[i].y1+=1;
-		
+
 		printf("(%d, %d) -> (%d, %d)\n", glyphs[i].x0, glyphs[i].y0, 
 			glyphs[i].x1, glyphs[i].y1);
 			
-		//if (save_letter(src, glyphs[i], i) < 0)
-		//	printf("error saving %d\n", i);
+		if (save_letter(src, glyphs[i], i) < 0)
+			printf("error saving %d\n", i);
 	}
 	
 	
@@ -478,7 +472,7 @@ int main (int argc, const char **argv)
 				
 			int k = cmp_letters_multiple(src, glyphs[i], letter_dt, l2);
 			
-			if (k >= 0 && k < (8 * src.pixsz)) 
+			if (k >= 0 && k < (4 * src.pixsz)) 
 				printf("letter %d = %s\n", i, ds->d_name);
 			
 			free(letter_dt.flat);
