@@ -269,79 +269,34 @@ int fill_lines (struct img_dt src, struct line_entry *lines, int num_lines,
 	return num_letters;
 }
 
-int flood_cmp (struct img_dt src, int pos_src, int pos_dst, int threshold)
+#define MAX_MIN_CMP 999999999
+
+int cmp_block_letter (struct img_dt src, struct letter_data l1, 
+			struct img_dt ltr, struct letter_data l2, 
+			unsigned char *background, int x, int y)
 {
-	unsigned char background[4] = {0xFF, 0xFF, 0xFF, 0xFF};
-	struct queue cmp_queue;
-	int missing_pixels = 0;
-	int s, d;
-	
-	if (pos_src < 0 || src.used[pos_src] || pos_dst < 0 || src.used[pos_dst])
-		return 0;
-		
-	memset(&cmp_queue, 0, sizeof(struct queue));
-	
-	push(&cmp_queue, pos_src);
-	push(&cmp_queue, pos_dst);
-	
-	while (cmp_queue.size) {
-		pos_src = pop(&cmp_queue);
-		pos_dst = pop(&cmp_queue);
-		
-		if (src.used[pos_src] || src.used[pos_dst])
-			continue;
-
-		if (!memcmp(&src.flat[pos_src], background, src.pixsz))
-			continue;
-		
-		
-		src.used[pos_src] = 1;
-		src.used[pos_dst] = 1;
-		
-		if (memcmp(&src.flat[pos_src], &src.flat[pos_dst], src.pixsz)) {
-			if (++missing_pixels > threshold)
-				break;
-		}
-
-		for (s = -1; s <= 1; s++) {
-			for (d = -1; d <= 1; d++) {
-				if (!s && !d) continue;
-				push(&cmp_queue,index_flat(src, pos_src, s, d));
-				push(&cmp_queue,index_flat(src, pos_dst, s, d));
-			}
-		}
-	}
-	
-	while (cmp_queue.size)
-		pop(&cmp_queue);
-	
-	return (missing_pixels > threshold) ? -1 : 0;
-}
-
-int cmp_letters (struct img_dt src, struct letter_data l1, struct letter_data l2)
-{
-	int l1_x = l1.x1 - l1.x0;
-	int l1_y = l1.y1 - l1.y0;
+	int total_missed = 0;
 	int l2_x = l2.x1 - l2.x0;
 	int l2_y = l2.y1 - l2.y0;
-	int total_missed = 0;
+	unsigned char *sptr, *lptr;
 	
-	if (l1_x < 0 || l1_y < 0 || l2_x != l1_x || l2_y != l1_y)
-		return -1;
-
 	int i, j;
-	for (i = 0; i < l1_y; i++) {
-		for (j = 0; j < l1_x; j++) {
-			int l1c = l1.buf_pos + (i * src.x) + j;
-			int l2c = l2.buf_pos + (i * src.x) + j;
-			
-			if (src.flat[l1c] != src.flat[l2c])
-				++total_missed;
+	unsigned char c_src, c_ltr;
+	
+	for (i = 0; i < l2_y; i++) {
+		for (j = 0; j < l2_x; j += src.pixsz) {
+			sptr = &src.flat[((i+l1.y0 +y)*src.x)+(j+l1.x0+x)];
+			lptr = &ltr.flat[((i+l2.y0) * ltr.x) + (j+l2.x0)];
 		
+			c_src = !!memcmp(sptr, background, src.pixsz);
+			c_ltr = !!memcmp(lptr, background, src.pixsz);
+			
+			if (c_src != c_ltr)
+				++total_missed;
 		}
 	}
 	
-	return total_missed;
+	return total_missed; 
 }
 
 int cmp_letters_multiple (struct img_dt src, struct letter_data l1, 
@@ -353,8 +308,10 @@ int cmp_letters_multiple (struct img_dt src, struct letter_data l1,
 	int l2_x = l2.x1 - l2.x0;
 	int l2_y = l2.y1 - l2.y0;	
 	int total_missed = 0;
-	
-	//printf("(%dx%d) (%dx%d)\n", l1_x, l1_y, l2_x, l2_y);
+	int x = 0, y = 0;
+	int min_tot_missed = MAX_MIN_CMP;	
+	int dx = l1_x - l2_x;
+	int dy = l1_y - l2_y;
 
 	if (l1_x < 0 || l1_y < 0 || l2_x < 0 || l2_y < 0)
 		return -1; 
@@ -365,49 +322,19 @@ int cmp_letters_multiple (struct img_dt src, struct letter_data l1,
 	if ((l1_x < l2_x) && (l1_y < l2_y)) 
 		return cmp_letters_multiple(ltr, l2, src, l1, background);
 		
-	/* l1 >= l2 */
-	
-	int min_tot_missed = 999999999;
-	
-	
-	int dx = l1_x - l2_x;
-	int dy = l1_y - l2_y;
-	
 	if (dx > (4 * src.pixsz) || dy > 4)
 		return -1;
 
-	int x = 0, y = 0;
-	
 	do {
-	x = 0;
-	do {
-	total_missed = 0;
+		x = 0;
+		do {
+			total_missed = cmp_block_letter(src, l1, ltr, 
+					l2, background, x, y);	
 	
-	int i, j;
-	unsigned char c_src, c_ltr;
-	for (i = 0; i < l2_y; i++) {
-		for (j = 0; j < l2_x; j += src.pixsz) {
+			if (total_missed < min_tot_missed)
+				min_tot_missed = total_missed;
 		
-		
-			c_src = memcmp(&src.flat[((i+l1.y0+y) * src.x) + (j+l1.x0+x)], 
-					background, src.pixsz);
-			c_ltr = memcmp(&ltr.flat[((i+l2.y0) * ltr.x) + (j + l2.x0)],
-					background, src.pixsz);
-					
-			//printf("src[%d] ltr [%d] %d %d\n", 
-			//((i+l1.y0+y) * src.x) + (j + l1.x0+x),
-			//((i+l2.y0) * l2_x) + (j + l2.x0),
-			//c_src, c_ltr);
-					
-			if ((!c_src && c_ltr) || (c_src && !c_ltr))
-				++total_missed;
-		}
-	}
-	
-	if (total_missed < min_tot_missed)
-		min_tot_missed = total_missed;
-		
-	} while ((x += src.pixsz) <= dx);
+		} while ((x += src.pixsz) <= dx);
 	} while (++y <= dy);	
 	 
 	return min_tot_missed;
@@ -440,7 +367,7 @@ int save_letter (struct img_dt src, struct letter_data l1, int index)
 	snprintf(wpath, sizeof(wpath), "/Users/nobody1/Desktop/letters/%d.png", index);
 	
 	for (i = 0; i < l1_y; i++) {
-		memcpy(buf + (i * l1_x), &src.flat[((l1.y0 + i) * src.x) + l1.x0], l1_x);
+		memcpy(buf+(i*l1_x), &src.flat[((l1.y0+i)*src.x)+l1.x0], l1_x);
 		
 	//	printf("copying %d bytes flat[%d] to buf[%d]\n", l1_x, 
 	//		((l1.y0 + i) * src.x) + l1.x0, (i * l1_x));
@@ -492,14 +419,13 @@ int main (int argc, const char **argv)
 			
 		//	glyphs[i].x0 -= src.pixsz;
 		//glyphs[i].y0 -= 1;	
-		glyphs[i].x1 += src.pixsz;
-		glyphs[i].y1 += 1;
+		//glyphs[i].x1 += src.pixsz;
+		//glyphs[i].y1 += 1;
 
 		printf("(%d, %d) -> (%d, %d)\n", glyphs[i].x0, glyphs[i].y0, 
 			glyphs[i].x1, glyphs[i].y1);
 			
-		//if (save_letter(src, glyphs[i], i) < 0)
-		//	printf("error saving %d\n", i);
+		//
 	}
 	
 	char *letter_buf = calloc(sizeof(char), num_letters * 3);
@@ -555,7 +481,12 @@ int main (int argc, const char **argv)
 		
 		printf("closest match for %d: %s (%d off)\n", i, min_buf, min_val);
 		
-		char *lptr = get_last(min_buf, '/') + 1;
+		if (min_val > 999999)
+			if (save_letter(src, glyphs[i], i) < 0)
+				printf("error saving %d\n", i);
+	
+		
+		char *lptr = (char *)get_last(min_buf, '/') + 1;
 		
 		if (i > 0 && (glyphs[i].x0 - glyphs[i - 1].x1) >= (4 * src.pixsz))
 			*letter_ptr++ = ' ';
