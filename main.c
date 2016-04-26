@@ -23,6 +23,8 @@ struct letter_data {
 	int buf_pos;
 	int x0, y0;
 	int x1, y1;
+	
+	
 };
 
 int alloc_img_from_file (const char *name, struct img_dt *ptr, int expect_size)
@@ -189,10 +191,7 @@ int flood_boundaries (struct img_dt src, int pos, unsigned char *find,
 	*x0 = src.x;
 	*y0 = src.y;
 	*x1 = *y1 = 0;
-	
-	if (pos < 0 || src.used[pos])
-		return -1;
-		
+
 	memset(&cmp_queue, 0, sizeof(struct queue));
 
 	push(&cmp_queue, pos);
@@ -346,30 +345,78 @@ int cmp_letters (struct img_dt src, struct letter_data l1, struct letter_data l2
 }
 
 int cmp_letters_multiple (struct img_dt src, struct letter_data l1, 
-			struct img_dt letter, struct letter_data l2)
+			struct img_dt ltr, struct letter_data l2, 
+			unsigned char *background)
 {
 	int l1_x = l1.x1 - l1.x0;
 	int l1_y = l1.y1 - l1.y0;
 	int l2_x = l2.x1 - l2.x0;
 	int l2_y = l2.y1 - l2.y0;	
 	int total_missed = 0;
+	
+	//printf("(%dx%d) (%dx%d)\n", l1_x, l1_y, l2_x, l2_y);
 
-	if (l1_x < 0 || l1_y < 0 || l2_x != l1_x || l2_y != l1_y)
+	if (l1_x < 0 || l1_y < 0 || l2_x < 0 || l2_y < 0)
+		return -1; 
+		
+	if (((l1_x > l2_x) && (l1_y < l2_y)) || ((l1_x < l2_x) && (l1_y > l2_y)))
 		return -1;
+		
+	if ((l1_x < l2_x) && (l1_y < l2_y)) 
+		return cmp_letters_multiple(ltr, l2, src, l1, background);
+		
+	/* l1 >= l2 */
 	
-	int letter_pos = 0;
-	int i, j;
+	int min_tot_missed = 999999999;
 	
-	for (i = l1.y0; i < l1.y1; i++)
-		for (j = l1.x0; j < l1.x1; j++)
-			if (src.flat[(i * src.x) + j] != 0xFF && 
-			 src.flat[(i * src.x) + j] != 
-			 letter.flat[((i - l1.y0) * src.x) + (j - l1.x0)])
-				++total_missed;
+	
+	int dx = l1_x - l2_x;
+	int dy = l1_y - l2_y;
+	
+	if (dx > (4 * src.pixsz) || dy > 4)
+		return -1;
 
+	int x = 0, y = 0;
 	
-				 
-	return total_missed;
+	do {
+	x = 0;
+	do {
+	total_missed = 0;
+	
+	int i, j;
+	unsigned char c_src, c_ltr;
+	for (i = 0; i < l2_y; i++) {
+		for (j = 0; j < l2_x; j += src.pixsz) {
+			c_src = memcmp(&src.flat[((i+l1.y0) * src.x) + (j + l1.x0)], 
+					background, src.pixsz);
+			c_ltr = memcmp(&ltr.flat[((i+l2.y0+y) * l2_x) + (j + l2.x0 + x)],
+					background, src.pixsz);
+					
+			if ((!c_src && c_ltr) || (c_src && !c_ltr))
+				++total_missed;
+		}
+	}
+	
+	if (total_missed < min_tot_missed)
+		min_tot_missed = total_missed;
+		
+	} while ((x += src.pixsz) <= dx);
+	} while (++y <= dy);	
+	 
+	return min_tot_missed;
+}
+
+const char *get_last (const char *dir, unsigned char cmp)
+{
+	const char *start = dir;
+	
+	while (*dir)
+		dir++;
+	
+	while (dir >= start && *dir != cmp)
+		dir--;
+	
+	return (dir == start) ? NULL : dir;
 }
 
 
@@ -385,10 +432,14 @@ int save_letter (struct img_dt src, struct letter_data l1, int index)
 	memset(wpath, 0, sizeof(wpath));
 	snprintf(wpath, sizeof(wpath), "/Users/nobody1/Desktop/letters/%d.png", index);
 	
-	for (i = 0; i < l1_y; i++)
-		memcpy(buf + (i * l1_x), &src.flat[((l1.y0 + i) * src.x) + l1.x0], l1_x);		
+	for (i = 0; i < l1_y; i++) {
+		memcpy(buf + (i * l1_x), &src.flat[((l1.y0 + i) * src.x) + l1.x0], l1_x);
 		
-	retn = stbi_write_png(wpath, l1_x / src.pixsz, l1_y, src.pixsz, buf, l1_x);
+	//	printf("copying %d bytes flat[%d] to buf[%d]\n", l1_x, 
+	//		((l1.y0 + i) * src.x) + l1.x0, (i * l1_x));
+	}		
+		
+	retn = stbi_write_png(wpath, (l1_x / src.pixsz), l1_y, src.pixsz, buf, l1_x);
 
 	free(buf);
 	
@@ -430,15 +481,22 @@ int main (int argc, const char **argv)
 		flood_boundaries (src, letters[i], background, 
 				&(glyphs[i].x0), &(glyphs[i].y0), 
 				&(glyphs[i].x1), &(glyphs[i].y1));
+			
+			
+		//	glyphs[i].x0 -= src.pixsz;
+		//glyphs[i].y0 -= 1;	
+		glyphs[i].x1 += src.pixsz;
+		glyphs[i].y1 += 1;
 
 		printf("(%d, %d) -> (%d, %d)\n", glyphs[i].x0, glyphs[i].y0, 
 			glyphs[i].x1, glyphs[i].y1);
 			
-		if (save_letter(src, glyphs[i], i) < 0)
-			printf("error saving %d\n", i);
+		//if (save_letter(src, glyphs[i], i) < 0)
+		//	printf("error saving %d\n", i);
 	}
 	
-	
+	char *letter_buf = calloc(sizeof(char), num_letters + 1);
+	char *letter_ptr = letter_buf;
 	
 	for (i = 0; i < num_letters; i++) {
 		DIR *dr;
@@ -447,6 +505,10 @@ int main (int argc, const char **argv)
 		struct img_dt letter_dt;
 		struct stat st;
 		struct dirent *ds;
+		int min_val = 999999999;
+		char min_buf[256];
+		
+		memset(min_buf, 0, sizeof(min_buf));
 		
 		if ((dr = opendir("/Users/nobody1/Desktop/letters")) == NULL)
 			return -1;
@@ -454,8 +516,9 @@ int main (int argc, const char **argv)
 		while ((ds = readdir(dr))) {
 			memset(&letter_dt, 0, sizeof(struct img_dt));
 			memset(&l2, 0, sizeof(struct letter_data));
+			
 			if (*(ds->d_name) == '.') continue;
-
+			
 			memset(wpath, 0, sizeof(wpath));
 			snprintf(wpath, sizeof(wpath), 
 				"/Users/nobody1/Desktop/letters/%s", ds->d_name);
@@ -469,18 +532,29 @@ int main (int argc, const char **argv)
 			l2.x0 = l2.y0 = 0;
 			l2.x1 = letter_dt.x;
 			l2.y1 = letter_dt.y;
-				
-			int k = cmp_letters_multiple(src, glyphs[i], letter_dt, l2);
 			
-			if (k >= 0 && k < (4 * src.pixsz)) 
-				printf("letter %d = %s\n", i, ds->d_name);
+			int k = cmp_letters_multiple(src, glyphs[i], letter_dt, l2, 
+			background);
+			
+			if (k >= 0 && k <= min_val) {
+				min_val = k;
+				strncpy(min_buf, ds->d_name, sizeof(min_buf));
+			}
 			
 			free(letter_dt.flat);
 		}
 		
 		closedir(dr);
 		
+		printf("closest match for %d: %s (%d off)\n", i, min_buf, min_val);
+		
+		char *lptr = get_last(min_buf, '/') + 1;
+		
+		*letter_ptr++ = *lptr;
 	}
+	
+	printf("[%s]: detected letters %s\n", __func__, letter_buf);
+	free(letter_buf);
 	
 	free(lines);
 	free(letters);
@@ -489,7 +563,7 @@ int main (int argc, const char **argv)
 	if (stbi_write_png("/Users/nobody1/Desktop/out.png", src.x / src.pixsz, src.y, 
 			   src.pixsz, src.flat, src.x) < 0)
 		printf("error writing\n");
-	
+
 	free(src.flat);
 	free(src.used);
 	
