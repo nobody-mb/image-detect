@@ -387,10 +387,17 @@ int cmp_letters_multiple (struct img_dt src, struct letter_data l1,
 	unsigned char c_src, c_ltr;
 	for (i = 0; i < l2_y; i++) {
 		for (j = 0; j < l2_x; j += src.pixsz) {
-			c_src = memcmp(&src.flat[((i+l1.y0) * src.x) + (j + l1.x0)], 
+		
+		
+			c_src = memcmp(&src.flat[((i+l1.y0+y) * src.x) + (j+l1.x0+x)], 
 					background, src.pixsz);
-			c_ltr = memcmp(&ltr.flat[((i+l2.y0+y) * l2_x) + (j + l2.x0 + x)],
+			c_ltr = memcmp(&ltr.flat[((i+l2.y0) * ltr.x) + (j + l2.x0)],
 					background, src.pixsz);
+					
+			//printf("src[%d] ltr [%d] %d %d\n", 
+			//((i+l1.y0+y) * src.x) + (j + l1.x0+x),
+			//((i+l2.y0) * l2_x) + (j + l2.x0),
+			//c_src, c_ltr);
 					
 			if ((!c_src && c_ltr) || (c_src && !c_ltr))
 				++total_missed;
@@ -495,7 +502,7 @@ int main (int argc, const char **argv)
 		//	printf("error saving %d\n", i);
 	}
 	
-	char *letter_buf = calloc(sizeof(char), num_letters + 1);
+	char *letter_buf = calloc(sizeof(char), num_letters * 3);
 	char *letter_ptr = letter_buf;
 	
 	for (i = 0; i < num_letters; i++) {
@@ -550,6 +557,12 @@ int main (int argc, const char **argv)
 		
 		char *lptr = get_last(min_buf, '/') + 1;
 		
+		if (i > 0 && (glyphs[i].x0 - glyphs[i - 1].x1) >= (4 * src.pixsz))
+			*letter_ptr++ = ' ';
+			
+		if (i > 0 && (glyphs[i].y0 - glyphs[i - 1].y1) >= (4))
+			*letter_ptr++ = '\n';
+			
 		*letter_ptr++ = *lptr;
 	}
 	
