@@ -279,21 +279,46 @@ int cmp_block_letter (struct img_dt src, struct letter_data l1,
 	int l2_x = l2.x1 - l2.x0;
 	int l2_y = l2.y1 - l2.y0;
 	unsigned char *sptr, *lptr;
-	
-	int i, j;
 	unsigned char c_src, c_ltr;
+	int i, j;
+	int mask = 0;
+	
+	
+	if (src.pixsz == 3) {
+		mask = 0x00FFFFFF;
+	} else if (src.pixsz == 4) {
+		mask = 0xFFFFFFFF;
+	} else {
+		return -1;
+	}
+	
+	unsigned int bkg = (*(unsigned int *)background) & mask;
+	unsigned int snt, lnt;
+	
+	sptr = src.flat + ((y + l1.y0) * src.x) + (x + l1.x0);
+	lptr = ltr.flat + (l2.y0 * ltr.x) + l2.x0;
 	
 	for (i = 0; i < l2_y; i++) {
 		for (j = 0; j < l2_x; j += src.pixsz) {
-			sptr = &src.flat[((i+l1.y0 +y)*src.x)+(j+l1.x0+x)];
-			lptr = &ltr.flat[((i+l2.y0) * ltr.x) + (j+l2.x0)];
-		
-			c_src = !!memcmp(sptr, background, src.pixsz);
-			c_ltr = !!memcmp(lptr, background, src.pixsz);
+			//sptr = &src.flat[((i+l1.y0+y)*src.x)+(j+l1.x0+x)];
+			//lptr = &ltr.flat[((i+l2.y0)  *ltr.x)+(j+l2.x0)];
+			
+			snt = (*(unsigned int *)&sptr[j]) & mask;
+			lnt = (*(unsigned int *)&lptr[j]) & mask;
+			
+			c_src = ((snt & mask) == bkg);
+			c_ltr = ((lnt & mask) == bkg);
+			
+			//c_src = !!memcmp(sptr, background, src.pixsz);
+			//c_ltr = !!memcmp(lptr, background, src.pixsz);
 			
 			if (c_src != c_ltr)
 				++total_missed;
+				
 		}
+		
+		lptr += ltr.x;
+		sptr += src.x;
 	}
 	
 	return total_missed; 
@@ -366,14 +391,11 @@ int save_letter (struct img_dt src, struct letter_data l1, int index)
 	memset(wpath, 0, sizeof(wpath));
 	snprintf(wpath, sizeof(wpath), "/Users/nobody1/Desktop/letters/%d.png", index);
 	
-	for (i = 0; i < l1_y; i++) {
+	for (i = 0; i < l1_y; i++)
 		memcpy(buf+(i*l1_x), &src.flat[((l1.y0+i)*src.x)+l1.x0], l1_x);
-		
-	//	printf("copying %d bytes flat[%d] to buf[%d]\n", l1_x, 
-	//		((l1.y0 + i) * src.x) + l1.x0, (i * l1_x));
-	}		
-		
-	retn = stbi_write_png(wpath, (l1_x / src.pixsz), l1_y, src.pixsz, buf, l1_x);
+
+	retn = stbi_write_png(wpath, (l1_x / src.pixsz), l1_y, src.pixsz, 
+				buf, l1_x);
 
 	free(buf);
 	
@@ -390,7 +412,7 @@ int main (int argc, const char **argv)
 		return -1;
 
 	src.used = calloc(sizeof(char), src.x * src.y);
-	int i, j, pos = 0;
+	int i, pos = 0;
 	
 	struct line_entry *lines;
 	int num_lines = split_lines(src, 0xFF, &lines);
