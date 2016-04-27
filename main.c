@@ -275,52 +275,87 @@ int cmp_block_letter (struct img_dt src, struct letter_data l1,
 			struct img_dt ltr, struct letter_data l2, 
 			unsigned char *background, int x, int y)
 {
-	int total_missed = 0;
+	unsigned int bkg, snt, lnt;
 	int l2_x = l2.x1 - l2.x0;
 	int l2_y = l2.y1 - l2.y0;
 	unsigned char *sptr, *lptr;
-	unsigned char c_src, c_ltr;
-	int i, j;
-	int mask = 0;
+	int i, j, mask, total_missed = 0;
 	
-	
-	if (src.pixsz == 3) {
+	if (src.pixsz == 3)
 		mask = 0x00FFFFFF;
-	} else if (src.pixsz == 4) {
+	else if (src.pixsz == 4)
 		mask = 0xFFFFFFFF;
-	} else {
+	else
 		return -1;
-	}
 	
-	unsigned int bkg = (*(unsigned int *)background) & mask;
-	unsigned int snt, lnt;
+	bkg = (*(unsigned int *)background) & mask;
 	
 	sptr = src.flat + ((y + l1.y0) * src.x) + (x + l1.x0);
 	lptr = ltr.flat + (l2.y0 * ltr.x) + l2.x0;
-	
-	for (i = 0; i < l2_y; i++) {
+	#if 0
+	asm volatile (			/* rbx = background */
+		"xorq %%rax, %%rax\n"		/* total_missed */
+		"xorq %%rdx, %%rdx\n"		/* j */
+		"movq %0, %%r8\n"		/* l2_y */
+		"movq %1, %%r9\n"		/* l2_x */
+		"movq %2, %%r10\n"		/* pixsz */
+		"movq %3, %%r11\n"		/* mask */
+		"movq %4, %%r12\n"		/* ltr.x */
+		"movq %5, %%r13\n"		/* src.x */
+		"xorq %%r14, %%r14\n"		/* j */
+	"cbl_loop:\n"
+		"decl %%r8\n"
+		"jz cbl_end\n"
+		
+		"xorq %%r14, %%r14\n"	/* j = 0 */
+	"cbl_rowloop:\n"
+		"cmpq %%r14, %%r9\n"	/* j < l2_x */
+		"jge cbl_rowend\n"
+		
+		"movl (%%rsi, %%r14), %%ebx\n"	/* snt = (uint)sptr[j] */
+		"movl (%%rdi, %%r14), %%edx\n"	/* lnt = (uint)lptr[j] */
+		
+		"andl %%r11d, %%ebx\n"		/* snt &= mask */
+		"andl %%r11d, %%edx\n"		/* lnt &= mask */
+		
+		
+		"cmpl %%ebx, %%edx\n"
+		"j
+	"cbl_rl1:\n"
+	"cbl_rl2:\n"
+		
+		"addq %%r10, %%r14\n"	/* j += pixsz */
+	"cbl_rowend:\n"
+		"addq %%r12, %%rdi\n"	/* lptr += ltr.x */
+		"addq %%r13, %%rsi\n"	/* sptr += src.x */
+		
+	"cbl_end:\n"
+		: "=a" (total_missed)
+		: "r" (l2_y),
+		  "r" (l2_x),
+		  "r" (src.pixsz),
+		  "r" (mask), 
+		  "r" (ltr.x),
+		  "r" (src.x),
+		  "S" (sptr),
+		  "D" (lptr),
+		  "b" (bkg));
+	        : "r8d", "r9d", "r10d", "r11d", "r12d", "r13d");
+
+	#else
+	while (l2_y--) {
 		for (j = 0; j < l2_x; j += src.pixsz) {
-			//sptr = &src.flat[((i+l1.y0+y)*src.x)+(j+l1.x0+x)];
-			//lptr = &ltr.flat[((i+l2.y0)  *ltr.x)+(j+l2.x0)];
-			
-			snt = (*(unsigned int *)&sptr[j]) & mask;
-			lnt = (*(unsigned int *)&lptr[j]) & mask;
-			
-			c_src = ((snt & mask) == bkg);
-			c_ltr = ((lnt & mask) == bkg);
-			
-			//c_src = !!memcmp(sptr, background, src.pixsz);
-			//c_ltr = !!memcmp(lptr, background, src.pixsz);
-			
-			if (c_src != c_ltr)
-				++total_missed;
-				
+			snt = ((*(unsigned int *)(sptr + j)) & mask);
+			lnt = ((*(unsigned int *)(lptr + j)) & mask);
+
+			if ((snt == bkg) != (lnt == bkg))
+				++total_missed;		
 		}
 		
 		lptr += ltr.x;
 		sptr += src.x;
 	}
-	
+	#endif
 	return total_missed; 
 }
 
