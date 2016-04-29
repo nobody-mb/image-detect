@@ -304,10 +304,10 @@ int cmp_block_letter (struct img_dt src, struct letter_data l1,
 		"jmp cbl_not_missed\n"
 		
 	"cbl_rowloop:\n"
-		"addq %[pixsz], %%r8\n"	/* j += pixsz */
-		
 		"movl (%%rsi, %%r8), %%ebx\n"	/* snt = (uint)sptr[j] */
 		"movl (%%rdi, %%r8), %%ecx\n"	/* lnt = (uint)lptr[j] */
+		
+		"addq %[pixsz], %%r8\n"	/* j += pixsz */
 		
 		"andl %[mask], %%ebx\n"		/* snt &= mask */
 		"andl %[mask], %%ecx\n"		/* lnt &= mask */
@@ -315,17 +315,16 @@ int cmp_block_letter (struct img_dt src, struct letter_data l1,
 		"cmpl %%ebx, %%ecx\n"	/* if snt == lnt */
 		"je cbl_not_missed\n"
 		
-		"cmpl %%ebx, %[bkg]\n"	/* if snt == bkg */
+		"cmpl %[bkg], %%ebx\n"	/* if snt == bkg */
 		"je cbl_not_missed\n"
 		
-		"cmpl %%ecx, %[bkg]\n"	/* if lnt == bkg */
+		"cmpl %[bkg], %%ecx\n"	/* if lnt == bkg */
 		"je cbl_not_missed\n"
 		
 		"incq %%rax\n"		/* total_missed++ */
 		
 	"cbl_not_missed:\n"	
-		
-		"cmpq %%r8, %[l2_x]\n"	/* j < l2_x */
+		"cmpq %[l2_x], %%r8\n"	/* j < l2_x */
 		"jl cbl_rowloop\n"
 		
 	"cbl_rowend:\n"
