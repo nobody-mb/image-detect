@@ -295,8 +295,17 @@ int cmp_block_letter (struct img_dt src, struct letter_data l1,
 	
 	#if 1
 	asm volatile (
-		"xorq %%rax, %%rax\n"		/* total_missed */
-		"xorq %%r8, %%r8\n"
+		"xorq %%rax, %%rax\n"	/* total_missed */
+		"xorq %%r8, %%r8\n"	/* j = 0 */
+		"xorq %%r9, %%r9\n"
+		"xorq %%r10, %%r10\n"
+		"movl %0, %%r9d\n"
+		"movl %1, %%r10d\n"
+		"movq %2, %%r11\n"
+		"movq %3, %%r12\n"
+		"movq %4, %%r13\n"
+		"movq %5, %%r14\n"
+
 		"jmp cbl_loopcheck\n"
 		
 	"cbl_loop:\n"
@@ -307,47 +316,47 @@ int cmp_block_letter (struct img_dt src, struct letter_data l1,
 		"movl (%%rsi, %%r8), %%ebx\n"	/* snt = (uint)sptr[j] */
 		"movl (%%rdi, %%r8), %%ecx\n"	/* lnt = (uint)lptr[j] */
 		
-		"addq %[pixsz], %%r8\n"	/* j += pixsz */
+		"addq %%r11, %%r8\n"	/* j += pixsz */
 		
-		"andl %[mask], %%ebx\n"		/* snt &= mask */
-		"andl %[mask], %%ecx\n"		/* lnt &= mask */
+		"andl %%r9d, %%ebx\n"		/* snt &= mask */
+		"andl %%r9d, %%ecx\n"		/* lnt &= mask */
 		
 		"cmpl %%ebx, %%ecx\n"	/* if snt == lnt */
 		"je cbl_not_missed\n"
 		
-		"cmpl %[bkg], %%ebx\n"	/* if snt == bkg */
+		"cmpl %%r10d, %%ebx\n"	/* if snt == bkg */
 		"je cbl_not_missed\n"
 		
-		"cmpl %[bkg], %%ecx\n"	/* if lnt == bkg */
+		"cmpl %%r10d, %%ecx\n"	/* if lnt == bkg */
 		"je cbl_not_missed\n"
 		
 		"incq %%rax\n"		/* total_missed++ */
 		
 	"cbl_not_missed:\n"	
-		"cmpq %[l2_x], %%r8\n"	/* j < l2_x */
+		"cmpq %%r14, %%r8\n"	/* j < l2_x */
 		"jl cbl_rowloop\n"
 		
 	"cbl_rowend:\n"
-		"addq %[ltr_x], %%rdi\n"	/* lptr += ltr.x */
-		"addq %[src_x], %%rsi\n"	/* sptr += src.x */
+		"addq %%r12, %%rdi\n"	/* lptr += ltr.x */
+		"addq %%r13, %%rsi\n"	/* sptr += src.x */
 		
 	"cbl_loopcheck:\n"
-		"decq %%rdx\n"
+		"decq %%rdx\n"		/* l2_y-- */
 		"jnz cbl_loop\n"
 		
 	"cbl_end:\n"
 		: "=a" (total_missed)	
-		: [l2_x] "g" (l2_x),
-		  [pixsz] "g" (src.pixsz),
-		  [ltr_x] "g" (ltr.x),
-		  [src_x] "g" (src.x),
-		  [mask] "g" (mask), 
-		  [bkg] "g" (bkg),
+		: "0" (mask),
+		  "1" (bkg),
+		  "2" (src.pixsz),
+		  "3" (ltr.x),
+		  "4" (src.x),
+		  "5" (l2_x),
 		  "d" (l2_y),
 		  "S" (sptr),
 		  "D" (lptr)
-	        : "r8", "ecx", "ebx");
-
+	        : "r8", "r9", "r10", "ecx", "ebx");
+	        
 	#else
 	while (l2_y--) {
 		for (j = 0; j < l2_x; j += src.pixsz) {
