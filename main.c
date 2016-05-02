@@ -29,11 +29,12 @@ struct letter_data {
 
 int alloc_img_from_file (const char *name, struct img_dt *ptr, int expect_size)
 {
+
 	unsigned char *buf = stbi_load(name, &ptr->x, &ptr->y, &ptr->pixsz, 0);
 	
 	ptr->x *= ptr->pixsz;
 	
-	ptr->flat = malloc(ptr->y * ptr->x);
+	ptr->flat = calloc(ptr->y, ptr->x + 1);
 	memcpy(ptr->flat, buf, ptr->y * ptr->x);
 	
     	stbi_image_free(buf);
@@ -294,32 +295,53 @@ int cmp_block_letter (struct img_dt src, struct letter_data l1,
 	lptr = ltr.flat + (l2.y0 * ltr.x) + l2.x0;
 	
 	#if 1
+	if (!l2_y)
+		return -1;
+	
+	
+	
+	unsigned int cmp_data[6] = { mask, 
+				bkg, 
+				src.pixsz, 
+				ltr.x - (l2_x * src.pixsz), 
+				src.x - (l2_x * src.pixsz), l2_x };
+				
+		printf("%d %d\n", cmp_data[3], cmp_data[4]);
+
 	asm volatile (
-		"xorq %%rax, %%rax\n"	/* total_missed */
 		"xorq %%r8, %%r8\n"	/* j = 0 */
 		"xorq %%r9, %%r9\n"
 		"xorq %%r10, %%r10\n"
-		"movl %0, %%r9d\n"
-		"movl %1, %%r10d\n"
-		"movq %2, %%r11\n"
-		"movq %3, %%r12\n"
-		"movq %4, %%r13\n"
-		"movq %5, %%r14\n"
+		"xorq %%r11, %%r11\n"
+		"xorq %%r14, %%r14\n"
+		"movsl 0(%%rbx), %%r9\n"
+		"movsl 4(%%rbx), %%r10\n"
+		"movsl 8(%%rbx), %%r11\n"
+		"movsl %%eax, %%r12\n"
+		"movsl %%ecx, %%r13\n"
+		"movsl 20(%%rbx), %%r14\n"
+		
+		"xorq %%rbx, %%rbx\n"
+		"xorq %%rax, %%rax\n"
+		"xorq %%rcx, %%rcx\n"
 
 		"jmp cbl_loopcheck\n"
 		
 	"cbl_loop:\n"
 		"xorq %%r8, %%r8\n"	/* j = 0 */
+		"decq %%rdx\n"
 		"jmp cbl_not_missed\n"
 		
 	"cbl_rowloop:\n"
-		"movl (%%rsi, %%r8), %%ebx\n"	/* snt = (uint)sptr[j] */
-		"movl (%%rdi, %%r8), %%ecx\n"	/* lnt = (uint)lptr[j] */
+		"movl (%%rsi, ), %%ebx\n"	/* snt = (uint)sptr[j] */
+		"movl (%%rdi), %%ecx\n"	/* lnt = (uint)lptr[j] */
 		
 		"addq %%r11, %%r8\n"	/* j += pixsz */
+		"addq %%r11, %%rsi\n"
+		"addq %%r11, %%rdi\n"
 		
-		"andl %%r9d, %%ebx\n"		/* snt &= mask */
-		"andl %%r9d, %%ecx\n"		/* lnt &= mask */
+		"andl %%r9d, %%ebx\n"	/* snt &= mask */
+		"andl %%r9d, %%ecx\n"	/* lnt &= mask */
 		
 		"cmpl %%ebx, %%ecx\n"	/* if snt == lnt */
 		"je cbl_not_missed\n"
@@ -333,29 +355,27 @@ int cmp_block_letter (struct img_dt src, struct letter_data l1,
 		"incq %%rax\n"		/* total_missed++ */
 		
 	"cbl_not_missed:\n"	
-		"cmpq %%r14, %%r8\n"	/* j < l2_x */
-		"jl cbl_rowloop\n"
+		"cmpl %%r8d, %%r14d\n"	/* j < l2_x */
+		"jge cbl_rowloop\n"
 		
 	"cbl_rowend:\n"
 		"addq %%r12, %%rdi\n"	/* lptr += ltr.x */
 		"addq %%r13, %%rsi\n"	/* sptr += src.x */
 		
 	"cbl_loopcheck:\n"
-		"decq %%rdx\n"		/* l2_y-- */
-		"jnz cbl_loop\n"
+		"cmpq $0, %%rdx\n"		/* l2_y-- */
+		"jg cbl_loop\n"
 		
 	"cbl_end:\n"
 		: "=a" (total_missed)	
-		: "0" (mask),
-		  "1" (bkg),
-		  "2" (src.pixsz),
-		  "3" (ltr.x),
-		  "4" (src.x),
-		  "5" (l2_x),
+		: "b" (cmp_data),
 		  "d" (l2_y),
+		  "a" ((signed int)(ltr.x - (l2_x * src.pixsz))),
+		  "c" ((signed int)(src.x - (l2_x * src.pixsz))),
 		  "S" (sptr),
 		  "D" (lptr)
-	        : "r8", "r9", "r10", "ecx", "ebx");
+	        : "r8", "r9", "r10", "r11", "r12", 
+	          "r13", "r14", "ecx", "ebx");
 	        
 	#else
 	while (l2_y--) {
@@ -494,8 +514,8 @@ int main (int argc, const char **argv)
 			
 		//	glyphs[i].x0 -= src.pixsz;
 		//glyphs[i].y0 -= 1;	
-		//glyphs[i].x1 += src.pixsz;
-		//glyphs[i].y1 += 1;
+		glyphs[i].x1 += src.pixsz;
+		glyphs[i].y1 += 1;
 
 		printf("(%d, %d) -> (%d, %d)\n", glyphs[i].x0, glyphs[i].y0, 
 			glyphs[i].x1, glyphs[i].y1);
@@ -578,6 +598,8 @@ int main (int argc, const char **argv)
 	free(lines);
 	free(letters);
 	free(glyphs);
+	
+	printf("%d %d\n", src.x, src.pixsz);
 	
 	if (stbi_write_png("/Users/nobody1/Desktop/out.png", src.x / src.pixsz, src.y, 
 			   src.pixsz, src.flat, src.x) < 0)
