@@ -23,8 +23,6 @@ struct letter_data {
 	int buf_pos;
 	int x0, y0;
 	int x1, y1;
-	
-	
 };
 
 int alloc_img_from_file (const char *name, struct img_dt *ptr, int expect_size)
@@ -44,6 +42,8 @@ int alloc_img_from_file (const char *name, struct img_dt *ptr, int expect_size)
 	
 	return 0;
 }
+
+#define MAX_MIN_CMP 999999999
 
 int index_flat (struct img_dt src, int pos, int dx, int dy)
 {
@@ -134,7 +134,8 @@ int split_lines (struct img_dt src, unsigned char background,
 {
 	int num_lines;
 
-	if (!(num_lines = split_state(src.x * src.y, src.flat, background, src.x, NULL)))
+	if (!(num_lines = split_state(src.x * src.y, src.flat, background, 
+					src.x, NULL)))
 		return 0;
 	
 	*out_lines = calloc(sizeof(struct line_entry), num_lines + 1);
@@ -270,87 +271,77 @@ int fill_lines (struct img_dt src, struct line_entry *lines, int num_lines,
 	return num_letters;
 }
 
-#define MAX_MIN_CMP 999999999
-
 int cmp_block_letter (struct img_dt src, struct letter_data l1, 
 			struct img_dt ltr, struct letter_data l2, 
 			unsigned char *background, int x, int y)
 {
-	unsigned int bkg, snt, lnt;
 	int l2_x = l2.x1 - l2.x0;
 	int l2_y = l2.y1 - l2.y0;
-	unsigned char *sptr, *lptr;
-	int i, j, mask, total_missed = 0;
+	int mask, total_missed = 0;
 	
-	if (src.pixsz == 3)
-		mask = 0x00FFFFFF;
-	else if (src.pixsz == 4)
-		mask = 0xFFFFFFFF;
-	else
-		return -1;
+	if (src.pixsz == 3) 		mask = 0x00FFFFFF;
+	else if (src.pixsz == 4) 	mask = 0xFFFFFFFF;
+	else 				return -1;
 	
-	bkg = (*(unsigned int *)background) & mask;
+	if (!l2_y) 			return -1;
 	
-	sptr = src.flat + ((y + l1.y0) * src.x) + (x + l1.x0);
-	lptr = ltr.flat + (l2.y0 * ltr.x) + l2.x0;
+	unsigned int bkg = (*(unsigned int *)background) & mask;
 	
+	unsigned char *sptr = src.flat + ((y + l1.y0) * src.x) + (x + l1.x0);
+	unsigned char *lptr = ltr.flat + (l2.y0 * ltr.x) + l2.x0;
+
 	#if 1
-	if (!l2_y)
-		return -1;
-	
 	unsigned int cmp_data[6] = { mask, bkg, src.pixsz, ltr.x, src.x, l2_x };
 
 	asm volatile (
-		"movl 0(%%rbx), %%r9d\n"
-		"movl 4(%%rbx), %%r10d\n"
-		"movsl 8(%%rbx), %%r11\n"
-		"movsl 12(%%rbx), %%r12\n"
-		"movsl 16(%%rbx), %%r13\n"
-		"movsl 20(%%rbx), %%r14\n"
-		"xorq %%rbx, %%rbx\n"
-		"xorq %%rax, %%rax\n"
-		"xorq %%rcx, %%rcx\n"
-		"jmp cbl_loopcheck\n"
+		"movl 	0(%%rbx), %%r9d\n"
+		"movl 	4(%%rbx), %%r10d\n"
+		"movsl	8(%%rbx), %%r11\n"
+		"movsl 	12(%%rbx), %%r12\n"
+		"movsl 	16(%%rbx), %%r13\n"
+		"movsl 	20(%%rbx), %%r14\n"
+		"xorq 	%%rax, %%rax\n"
+		"jmp 	cbl_loopcheck\n"
 	"cbl_loop:\n"
-		"xorq %%r8, %%r8\n"	/* j = 0 */
-		"jmp cbl_not_missed\n"
+		"xorq 	%%r8, %%r8\n"	/* j = 0 */
+		"jmp 	cbl_not_missed\n"
 	"cbl_rowloop:\n"
-		"movl (%%rsi, %%r8), %%ebx\n"	/* snt = (uint)sptr[j] */
-		"movl (%%rdi, %%r8), %%ecx\n"	/* lnt = (uint)lptr[j] */
-		"addq %%r11, %%r8\n"	/* j += pixsz */
-		"andl %%r9d, %%ebx\n"	/* snt &= mask */
-		"andl %%r9d, %%ecx\n"	/* lnt &= mask */
-		"cmpl %%ebx, %%ecx\n"	/* if snt == lnt */
-		"je cbl_not_missed\n"
-		"cmpl %%ebx, %%r10d\n"	/* if snt == bkg */
-		"je cbl_missed\n"
-		"cmpl %%ecx, %%r10d\n"	/* if lnt == bkg */
-		"jne cbl_not_missed\n"
+		"movl 	(%%rsi, %%r8), %%ebx\n"	/* snt = (uint)sptr[j] */
+		"movl 	(%%rdi, %%r8), %%ecx\n"	/* lnt = (uint)lptr[j] */
+		"addq 	%%r11, %%r8\n"	/* j += pixsz */
+		"andl 	%%r9d, %%ebx\n"	/* snt &= mask */
+		"andl 	%%r9d, %%ecx\n"	/* lnt &= mask */
+		"cmpl 	%%ebx, %%ecx\n"	/* if snt == lnt */
+		"je 	cbl_not_missed\n"
+		"cmpl 	%%ebx, %%r10d\n"	/* if snt == bkg */
+		"je 	cbl_missed\n"
+		"cmpl 	%%ecx, %%r10d\n"	/* if lnt == bkg */
+		"jne 	cbl_not_missed\n"
 	"cbl_missed:\n"
-		"incq %%rax\n"		/* total_missed++ */
+		"incq 	%%rax\n"		/* total_missed++ */
 	"cbl_not_missed:\n"	
-		"cmpq %%r8, %%r14\n"	/* j < l2_x */
-		"jge cbl_rowloop\n"
+		"cmpq 	%%r8, %%r14\n"	/* j < l2_x */
+		"jge 	cbl_rowloop\n"
 	"cbl_rowend:\n"
-		"addq %%r12, %%rdi\n"	/* lptr += ltr.x */
-		"addq %%r13, %%rsi\n"	/* sptr += src.x */
+		"addq 	%%r12, %%rdi\n"	/* lptr += ltr.x */
+		"addq 	%%r13, %%rsi\n"	/* sptr += src.x */
 	"cbl_loopcheck:\n"
-		"decq %%rdx\n"		/* l2_y-- */
-		"jnz cbl_loop\n"
+		"decq 	%%rdx\n"		/* l2_y-- */
+		"jnz 	cbl_loop\n"
 		: "=a" (total_missed)	
 		: "b" (cmp_data), "d" (l2_y), "S" (sptr), "D" (lptr)
 	        : "r8", "r9", "r10", "r11", "r12", 
 	          "r13", "r14", "rcx", "rbx");
 	        
 	#else
-	while (l2_y--) {
+	int i, j;
+	unsigned int snt, lnt;
+	
+	while (l2_y-- > 0) {
 		for (j = 0; j < l2_x; j += src.pixsz) {
 			snt = ((*(unsigned int *)(sptr + j)) & mask);
 			lnt = ((*(unsigned int *)(lptr + j)) & mask);
 
-			/*if (((snt == bkg) && (lnt != bkg)) || 
-				((snt != bkg) && (lnt == bkg)))
-			  if ((snt == bkg) != (lnt == bkg))*/
 			if ((snt != lnt) && (snt == bkg || lnt == bkg))
 				++total_missed;		
 		}
@@ -440,54 +431,12 @@ int save_letter (struct img_dt src, struct letter_data l1, int index)
 	return retn;
 }
 
-int main (int argc, const char **argv)
+
+int read_letters (struct img_dt src, unsigned char *background, unsigned char *rep,
+		 struct line_entry *lines, int num_lines, int *letters, 
+		 int num_letters, struct letter_data *glyphs)
 {
-	struct img_dt src;
-	unsigned char background[4] = {0xFF, 0xFF, 0xFF, 0xFF};
-	unsigned char rep[4] = {0x20, 0x99, 0x99, 0x99};
-	
-	if (alloc_img_from_file("/Users/nobody1/Desktop/test.png", &src, 0))
-		return -1;
-
-	src.used = calloc(sizeof(char), src.x * src.y);
-	int i, pos = 0;
-	
-	struct line_entry *lines;
-	int num_lines = split_lines(src, 0xFF, &lines);
-	
-	for (i = 0; i < num_lines; i++)
-		printf("line %d: row %d - %d\n", i, lines[i].start, lines[i].end);
-	
-	int *letters;
-	int num_letters;
-	
-	num_letters = fill_lines(src, lines, num_lines, background, rep, &letters);
-
-	struct letter_data *glyphs = calloc(sizeof(struct letter_data), num_letters + 1);
-	
-	for (i = 0; i < num_letters; i++) {
-		glyphs[i].buf_pos = pos = letters[i];
-
-		printf("letter at pos %d\n", pos);
-		src.flat[pos+0] = 0x90;
-		src.flat[pos+2] = src.flat[pos+1] = 0x10;
-
-		flood_boundaries (src, letters[i], background, 
-				&(glyphs[i].x0), &(glyphs[i].y0), 
-				&(glyphs[i].x1), &(glyphs[i].y1));
-			
-			
-		//	glyphs[i].x0 -= src.pixsz;
-		//glyphs[i].y0 -= 1;	
-		glyphs[i].x1 += src.pixsz;
-		glyphs[i].y1 += 1;
-
-		printf("(%d, %d) -> (%d, %d)\n", glyphs[i].x0, glyphs[i].y0, 
-			glyphs[i].x1, glyphs[i].y1);
-			
-		//
-	}
-	
+	int i = 0, pos;
 	char *letter_buf = calloc(sizeof(char), num_letters * 3);
 	char *letter_ptr = letter_buf;
 	
@@ -560,13 +509,67 @@ int main (int argc, const char **argv)
 	printf("[%s]: detected letters %s\n", __func__, letter_buf);
 	free(letter_buf);
 	
+
+	printf("%d %d\n", src.x, src.pixsz);
+	
+	return 0;
+}
+
+int main (int argc, const char **argv)
+{
+	struct img_dt src;
+	unsigned char background[4] = {0xFF, 0xFF, 0xFF, 0xFF};
+	unsigned char rep[4] = {0x20, 0x99, 0x99, 0x99};
+	
+	if (alloc_img_from_file("/Users/nobody1/Desktop/test.png", &src, 0))
+		return -1;
+
+	src.used = calloc(sizeof(char), src.x * src.y);
+	int i, pos = 0;
+	
+	struct line_entry *lines;
+	int num_lines = split_lines(src, 0xFF, &lines);
+	
+	for (i = 0; i < num_lines; i++)
+		printf("line %d: row %d - %d\n", i, lines[i].start, lines[i].end);
+	
+	int *letters;
+	int num_letters;
+	
+	num_letters = fill_lines(src, lines, num_lines, background, rep, &letters);
+
+	struct letter_data *glyphs = calloc(sizeof(struct letter_data), 
+					    num_letters + 1);
+	
+	for (i = 0; i < num_letters; i++) {
+		glyphs[i].buf_pos = pos = letters[i];
+
+		printf("letter at pos %d\n", pos);
+		src.flat[pos+0] = 0x90;
+		src.flat[pos+2] = src.flat[pos+1] = 0x10;
+
+		flood_boundaries (src, letters[i], background, 
+				&(glyphs[i].x0), &(glyphs[i].y0), 
+				&(glyphs[i].x1), &(glyphs[i].y1));
+
+		glyphs[i].x1 += src.pixsz;
+		glyphs[i].y1 += 1;
+
+		printf("(%d, %d) -> (%d, %d)\n", glyphs[i].x0, glyphs[i].y0, 
+			glyphs[i].x1, glyphs[i].y1);
+	}
+
+
+	if (read_letters(src, background, rep, lines, num_lines, 
+			letters, num_letters, glyphs) < 0)
+		printf("couldn't read\n");
+		
 	free(lines);
 	free(letters);
 	free(glyphs);
 	
-	printf("%d %d\n", src.x, src.pixsz);
-	
-	if (stbi_write_png("/Users/nobody1/Desktop/out.png", src.x / src.pixsz, src.y, 
+	if (stbi_write_png("/Users/nobody1/Desktop/out.png", 
+			   src.x / src.pixsz, src.y, 
 			   src.pixsz, src.flat, src.x) < 0)
 		printf("error writing\n");
 
