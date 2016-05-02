@@ -418,7 +418,8 @@ int save_letter (struct img_dt src, struct letter_data l1, int index)
 	unsigned char *buf = calloc(sizeof(char), (l1_x * l1_y) + 1);
 	
 	memset(wpath, 0, sizeof(wpath));
-	snprintf(wpath, sizeof(wpath), "/Users/nobody1/Desktop/letters/%d.png", index);
+	snprintf(wpath, sizeof(wpath), 
+		"/Users/nobody1/Desktop/letters/%d.png", index);
 	
 	for (i = 0; i < l1_y; i++)
 		memcpy(buf+(i*l1_x), &src.flat[((l1.y0+i)*src.x)+l1.x0], l1_x);
@@ -431,63 +432,73 @@ int save_letter (struct img_dt src, struct letter_data l1, int index)
 	return retn;
 }
 
+int find_closest (const char *path, int *min_val, char *min_buf, struct img_dt src, struct letter_data glyph, unsigned char *background)
+{
+	DIR *dr;
+	char wpath[1024];
+	struct letter_data l2;
+	struct img_dt letter_dt;
+	struct stat st;
+	struct dirent *ds;
+
+	memset(min_buf, 0, 256);
+	
+	if ((dr = opendir(path)) == NULL)
+		return -1;
+		
+	while ((ds = readdir(dr))) {
+		memset(&letter_dt, 0, sizeof(struct img_dt));
+		memset(&l2, 0, sizeof(struct letter_data));
+		
+		if (*(ds->d_name) == '.') continue;
+		
+		memset(wpath, 0, sizeof(wpath));
+		snprintf(wpath, sizeof(wpath), "%s/%s", path, ds->d_name);
+		
+		if (stat(wpath, &st) < 0) continue;
+			
+		if (S_ISDIR(st.st_mode)) continue;
+		
+		if (alloc_img_from_file(wpath, &letter_dt, 0)) continue;
+			
+		l2.x0 = l2.y0 = 0;
+		l2.x1 = letter_dt.x;
+		l2.y1 = letter_dt.y;
+		
+		int k = cmp_letters_multiple(src, glyph, letter_dt, l2, 
+		background);
+		
+		if (k >= 0 && k <= *min_val) {
+			*min_val = k;
+			strncpy(min_buf, ds->d_name, 256);
+		}
+		
+		free(letter_dt.flat);
+	}
+	
+	closedir(dr);
+
+	return 0;
+}
 
 int read_letters (struct img_dt src, unsigned char *background, unsigned char *rep,
 		 struct line_entry *lines, int num_lines, int *letters, 
 		 int num_letters, struct letter_data *glyphs)
 {
-	int i = 0, pos;
+	int i = 0;
 	char *letter_buf = calloc(sizeof(char), num_letters * 3);
 	char *letter_ptr = letter_buf;
 	
 	for (i = 0; i < num_letters; i++) {
-		DIR *dr;
-		char wpath[1024];
-		struct letter_data l2;
-		struct img_dt letter_dt;
-		struct stat st;
-		struct dirent *ds;
 		int min_val = 999999999;
 		char min_buf[256];
 		
 		memset(min_buf, 0, sizeof(min_buf));
 		
-		if ((dr = opendir("/Users/nobody1/Desktop/letters")) == NULL)
-			return -1;
-			
-		while ((ds = readdir(dr))) {
-			memset(&letter_dt, 0, sizeof(struct img_dt));
-			memset(&l2, 0, sizeof(struct letter_data));
-			
-			if (*(ds->d_name) == '.') continue;
-			
-			memset(wpath, 0, sizeof(wpath));
-			snprintf(wpath, sizeof(wpath), 
-				"/Users/nobody1/Desktop/letters/%s", ds->d_name);
-			
-			if (stat(wpath, &st) < 0) continue;
-				
-			if (S_ISDIR(st.st_mode)) continue;
-			
-			if (alloc_img_from_file(wpath, &letter_dt, 0)) continue;
-				
-			l2.x0 = l2.y0 = 0;
-			l2.x1 = letter_dt.x;
-			l2.y1 = letter_dt.y;
-			
-			int k = cmp_letters_multiple(src, glyphs[i], letter_dt, l2, 
-			background);
-			
-			if (k >= 0 && k <= min_val) {
-				min_val = k;
-				strncpy(min_buf, ds->d_name, sizeof(min_buf));
-			}
-			
-			free(letter_dt.flat);
-		}
-		
-		closedir(dr);
-		
+		if (find_closest("/Users/nobody1/Desktop/letters", 
+			         &min_val, min_buf, src, glyphs[i], background) < 0)
+			printf("couldn't find closest\n");
+
 		printf("closest match for %d: %s (%d off)\n", i, min_buf, min_val);
 		
 		if (min_val > 999999)
