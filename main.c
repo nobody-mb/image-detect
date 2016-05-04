@@ -484,9 +484,14 @@ int read_letters (struct ocr_data ocr)
 
 		printf("closest match for %d: %s (%d off)\n", i, min_buf, min_val);
 		
-		if (min_val >= MAX_MIN_CMP)
-			if (save_letter(ocr.src, ocr.glyphs[i], i, ocr.let_path) < 0)
+		if (min_val >= MAX_MIN_CMP) {
+			if ((ocr.glyphs[i].x1 - ocr.glyphs[i].x0) <= 1 || 
+			    (ocr.glyphs[i].y1 - ocr.glyphs[i].y0) <= 1)
+				printf("bad dimensions\n");
+			else if (save_letter(ocr.src, ocr.glyphs[i], i, 
+				 ocr.let_path) < 0)
 				printf("error saving %d\n", i);
+		}
 		
 		if (i > 0 && (ocr.glyphs[i].x0 - ocr.glyphs[i - 1].x1) >= 
 						(4 * ocr.src.pixsz))
@@ -496,6 +501,9 @@ int read_letters (struct ocr_data ocr)
 			*letter_ptr++ = '\n';
 			
 		*letter_ptr++ = *((char *)get_last(min_buf, '/') + 1);
+		
+		if (*(letter_ptr - 1) == 0)
+			*(letter_ptr - 1) = '?';
 	}
 	
 	printf("[%s]: detected letters %s\n", __func__, letter_buf);
@@ -581,7 +589,7 @@ int main (int argc, const char **argv)
 	memcpy(ocr.background, background, sizeof(ocr.background));
 	memcpy(ocr.rep, rep, sizeof(ocr.rep));	
 	
-	ocr.src_path = "/Users/nobody1/Desktop/test.png";
+	ocr.src_path = "/Users/nobody1/Desktop/allchars.png";
 	ocr.let_path = "/Users/nobody1/Desktop/letters";
 	ocr.dst_path = "/Users/nobody1/Desktop/out.png";
 	ocr.tolerance = 127;
