@@ -338,25 +338,23 @@ int cmp_letters_multiple (struct img_dt src, struct letter_data l1,
 			struct img_dt ltr, struct letter_data l2, 
 			unsigned char *background)
 {
-	int l1_x = l1.x1 - l1.x0;
-	int l1_y = l1.y1 - l1.y0;
-	int l2_x = l2.x1 - l2.x0;
-	int l2_y = l2.y1 - l2.y0;	
+	int l1_x, l1_y, l2_x, l2_y;	
 	int total_missed = 0;
-	int x = 0, y = 0;
+	int x = 0, y = 0, dx, dy;
 	int min_tot_missed = MAX_MIN_CMP;	
-	int dx = l1_x - l2_x;
-	int dy = l1_y - l2_y;
 
-	if (l1_x < 0 || l1_y < 0 || l2_x < 0 || l2_y < 0 ||
-		((l1_x > l2_x) && (l1_y < l2_y)) || 
-		((l1_x < l2_x) && (l1_y > l2_y)))
+	if ((l1_x = l1.x1 - l1.x0) < 0 ||
+	    (l1_y = l1.y1 - l1.y0) < 0 ||
+	    (l2_x = l2.x1 - l2.x0) < 0 ||
+	    (l2_y = l2.y1 - l2.y0) < 0 ||
+	    ((l1_x > l2_x) && (l1_y < l2_y)) || 
+	    ((l1_x < l2_x) && (l1_y > l2_y)))
 		return -1;
 		
 	if ((l1_x < l2_x) && (l1_y < l2_y)) 
 		return cmp_letters_multiple(ltr, l2, src, l1, background);
-		
-	if (dx > (4 * src.pixsz) || dy > 4)
+
+	if ((dx = l1_x - l2_x) > (4 * src.pixsz) || (dy = l1_y - l2_y) > 4)
 		return -1;
 
 	do {
@@ -577,28 +575,56 @@ int fill_lines (struct ocr_data *ocr)
 	return ocr->num_letters;
 }
 
+int ocr_init (struct ocr_data *ocr, const char *src_path, const char *let_path, 
+		const char *dst_path, int tolerance, unsigned int background,
+		unsigned int rep)
+{
+	memset(ocr, 0, sizeof(struct ocr_data));
+	
+	ocr->src_path = src_path;
+	ocr->let_path = let_path;
+	ocr->dst_path = dst_path;
+	
+	ocr->tolerance = tolerance;
+	
+	if (alloc_img_from_file(ocr->src_path, &(ocr->src), 0))
+		return -1;
+		
+	memcpy(ocr->background, &background, sizeof(ocr->background));
+	memcpy(ocr->rep, &rep, sizeof(ocr->rep));	
+		
+	ocr->src.used = calloc(ocr->src.x, ocr->src.y);
+	
+	return 0;
+}
+
+int ocr_save_and_free (struct ocr_data *ocr)
+{
+	int retn = stbi_write_png(ocr->dst_path, ocr->src.x / ocr->src.pixsz,
+				ocr->src.y, ocr->src.pixsz, 
+				ocr->src.flat, ocr->src.x);
+
+	free(ocr->lines);
+	free(ocr->letters);
+	free(ocr->glyphs);
+	free(ocr->src.flat);
+	free(ocr->src.used);
+
+	return retn;
+}
 
 int main (int argc, const char **argv)
 {
 	struct ocr_data ocr;
-	unsigned char background[4] = {0xFF, 0xFF, 0xFF, 0xFF};
-	unsigned char rep[4] = {0x20, 0x99, 0x99, 0x99};
-	
-	memset(&ocr, 0, sizeof(struct ocr_data));
-	
-	memcpy(ocr.background, background, sizeof(ocr.background));
-	memcpy(ocr.rep, rep, sizeof(ocr.rep));	
-	
-	ocr.src_path = "/Users/nobody1/Desktop/allchars.png";
-	ocr.let_path = "/Users/nobody1/Desktop/letters";
-	ocr.dst_path = "/Users/nobody1/Desktop/out.png";
-	ocr.tolerance = 127;
-	
-	if (alloc_img_from_file(ocr.src_path, &(ocr.src), 0))
-		return -1;
 
-	ocr.src.used = calloc(sizeof(char), ocr.src.x * ocr.src.y);
-	
+	if (ocr_init(&ocr, "/Users/nobody1/Desktop/test.png",
+			   "/Users/nobody1/Desktop/letters", 
+			   "/Users/nobody1/Desktop/out.png",
+			   127, 0xFFFFFFFF, 0x209999FF) < 0) { 
+		printf("error initializing ocr\n");
+		return -1;
+	}
+
 	ocr.num_lines = split_lines(ocr.src, 0xFF, &(ocr.lines));
 
 	if (fill_lines(&ocr) < 0)
@@ -609,16 +635,9 @@ int main (int argc, const char **argv)
 
 	if (read_letters(ocr) < 0)
 		printf("error reading\n");
-	
-	if (stbi_write_png(ocr.dst_path, ocr.src.x / ocr.src.pixsz, ocr.src.y, 
-			   ocr.src.pixsz, ocr.src.flat, ocr.src.x) < 0)
+		
+	if (ocr_save_and_free(&ocr) < 0)
 		printf("error writing\n");
-
-	free(ocr.lines);
-	free(ocr.letters);
-	free(ocr.glyphs);
-	free(ocr.src.flat);
-	free(ocr.src.used);
 	
 	return 0;
 }
