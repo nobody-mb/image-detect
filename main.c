@@ -163,37 +163,47 @@ int split_lines (struct img_dt src, unsigned char background,
 
 int flood_fill (struct ocr_data *ocr, int pos)
 {
-	if (pos < 0 || ocr->src.used[pos])
-		return -1;
+	struct queue cmp_queue;
+	int flag = 0;
 	
-	int i, total = 0;
-	for (i = 0; i < ocr->src.pixsz; i++) {
-		if (ocr->src.flat[pos + i] > ocr->background[i])
-			total += (ocr->src.flat[pos + i] - ocr->background[i]);
-		else
-			total += (ocr->background[i] - ocr->src.flat[pos + i]);
-	}
+	memset(&cmp_queue, 0, sizeof(struct queue));
+	
+	push(&cmp_queue, pos);
+	
+	while (cmp_queue.size) {
+		if ((pos = pop(&cmp_queue)) < 0 || ocr->src.used[pos])
+			continue;	
+			
+		int i, s, d, total = 0;
+		for (i = 0; i < ocr->src.pixsz; i++) {
+			if (ocr->src.flat[pos + i] > ocr->background[i])
+				total += (ocr->src.flat[pos + i] - 
+					  ocr->background[i]);
+			else
+				total += (ocr->background[i] - 
+					  ocr->src.flat[pos + i]);
+		}
 
-	if (total <= (ocr->tolerance * ocr->src.pixsz)) {
-		memcpy(&ocr->src.flat[pos], ocr->background, ocr->src.pixsz);
-		return -1;
+		if (total <= (ocr->tolerance * ocr->src.pixsz)) {
+			memcpy(&ocr->src.flat[pos], ocr->background, ocr->src.pixsz);
+			continue;
+		}
+		
+		flag = 1;
+		ocr->src.used[pos] = 1;
+	
+		memcpy(&ocr->src.flat[pos], ocr->rep, ocr->src.pixsz);
+	
+		for (s = -1; s <= 1; s++)
+			for (d = -1; d <= 1; d++)
+				if (s || d)
+					push(&cmp_queue, 
+					     index_flat(ocr->src, pos, s, d));
+
+	
 	}
 	
-	ocr->src.used[pos] = 1;
-	
-	memcpy(&ocr->src.flat[pos], ocr->rep, ocr->src.pixsz);
-	
-	flood_fill(ocr, index_flat(ocr->src, pos, 0, -1));
-	flood_fill(ocr, index_flat(ocr->src, pos, 0,  1));
-	flood_fill(ocr, index_flat(ocr->src, pos, -1, 0));
-	flood_fill(ocr, index_flat(ocr->src, pos, 1,  0));
-	
-	flood_fill(ocr, index_flat(ocr->src, pos, 1, -1));
-	flood_fill(ocr, index_flat(ocr->src, pos, -1, 1));
-	flood_fill(ocr, index_flat(ocr->src, pos, -1,-1));
-	flood_fill(ocr, index_flat(ocr->src, pos, 1,  1));
-	
-	return 0;
+	return (!flag) ? -1 : 0;
 }
 
 
@@ -527,6 +537,7 @@ int fill_lines (struct ocr_data *ocr)
 	int i, pos, mid_line = 0, last_mid = 0;
 	
 	memset(&letter_queue, 0, sizeof(struct queue));
+	memset(ocr->src.used, 0, ocr->src.x * ocr->src.y);
 
 	for (i = 0; i < ocr->num_lines; i++) {
 		last_mid = mid_line + (10 * srcx);
