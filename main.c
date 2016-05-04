@@ -13,7 +13,7 @@
 #include "stb_image_write.h"
 
 #define MAX_MIN_CMP 999999999
-#define CMP_BUF_SIZ 256
+#define CMP_BUF_SIZ 512
 
 struct queue {
 	struct node {
@@ -533,7 +533,36 @@ int read_letters (struct ocr_data ocr)
 	return 0;
 }
 
-int measure_letters (struct img_dt src, int num_letters, int *letters, 
+int measure_letters (struct ocr_data *ocr)
+{
+	int i; 
+
+	ocr->glyphs = calloc(sizeof(struct letter_data), ocr->num_letters + 1);
+	
+	for (i = 0; i < ocr->num_letters; i++) {
+		ocr->glyphs[i].buf_pos = ocr->letters[i];
+
+		ocr->src.flat[ocr->letters[i] + 0] = 0x90;
+		ocr->src.flat[ocr->letters[i] + 1] = 0x10;
+		ocr->src.flat[ocr->letters[i] + 2] = 0x10;
+
+		flood_boundaries(ocr->src, ocr->letters[i], ocr->background, 
+				&(ocr->glyphs[i].x0), &(ocr->glyphs[i].y0), 
+				&(ocr->glyphs[i].x1), &(ocr->glyphs[i].y1));
+
+		ocr->glyphs[i].x1 += ocr->src.pixsz;
+		ocr->glyphs[i].y1 += 1;
+
+		fprintf(stderr, "[%s]: letter #%d at pos %d: (%d, %d) -> (%d, %d)\n", 
+			__func__, i, ocr->letters[i], 
+			ocr->glyphs[i].x0, ocr->glyphs[i].y0, 
+			ocr->glyphs[i].x1, ocr->glyphs[i].y1);
+	}
+
+	return 0;
+}
+
+int measure_letters_old (struct img_dt src, int num_letters, int *letters, 
 		     struct letter_data **gptr, unsigned char *background)
 {
 	int i; 
@@ -565,6 +594,7 @@ int measure_letters (struct img_dt src, int num_letters, int *letters,
 	return 0;
 }
 
+
 int main (int argc, const char **argv)
 {
 	struct ocr_data ocr;
@@ -573,8 +603,8 @@ int main (int argc, const char **argv)
 	
 	memset(&ocr, 0, sizeof(struct ocr_data));
 	
-	memcpy(ocr.background, background, sizeof(background));
-	memcpy(ocr.rep, rep, sizeof(rep));	
+	memcpy(ocr.background, background, sizeof(ocr.background));
+	memcpy(ocr.rep, rep, sizeof(ocr.rep));	
 	
 	ocr.src_path = "/Users/nobody1/Desktop/test.png";
 	ocr.let_path = "/Users/nobody1/Desktop/letters";
@@ -590,8 +620,10 @@ int main (int argc, const char **argv)
 	ocr.num_letters = fill_lines(ocr.src, ocr.lines, ocr.num_lines,
 				ocr.background, ocr.rep, &(ocr.letters));
 	
-	measure_letters(ocr.src, ocr.num_letters, ocr.letters, 
-			&(ocr.glyphs), ocr.background);
+	//measure_letters(ocr.src, ocr.num_letters, ocr.letters, 
+	//		&(ocr.glyphs), ocr.background);
+	
+	measure_letters(&ocr);
 
 	if (read_letters(ocr) < 0)
 		printf("error reading\n");
