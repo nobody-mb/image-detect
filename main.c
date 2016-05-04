@@ -34,6 +34,7 @@ struct ocr_data {
 
 	unsigned char background[4];
 	unsigned char rep[4];
+	int tolerance;
 	
 	struct line_entry {
 		int start;
@@ -160,38 +161,37 @@ int split_lines (struct img_dt src, unsigned char background,
 	return num_lines;
 }
 
-int flood_fill (struct img_dt src, int pos, unsigned char *find, 
-		unsigned char *rep, int threshold)
+int flood_fill (struct ocr_data *ocr, int pos)
 {
-	if (pos < 0 || src.used[pos])
+	if (pos < 0 || ocr->src.used[pos])
 		return -1;
 	
 	int i, total = 0;
-	for (i = 0; i < src.pixsz; i++) {
-		if (src.flat[pos + i] > find[i])
-			total += (src.flat[pos + i] - find[i]);
+	for (i = 0; i < ocr->src.pixsz; i++) {
+		if (ocr->src.flat[pos + i] > ocr->background[i])
+			total += (ocr->src.flat[pos + i] - ocr->background[i]);
 		else
-			total += (find[i] - src.flat[pos + i]);
+			total += (ocr->background[i] - ocr->src.flat[pos + i]);
 	}
 
-	if (total <= (threshold * src.pixsz)) {
-		memcpy(&src.flat[pos], find, src.pixsz);
+	if (total <= (ocr->tolerance * ocr->src.pixsz)) {
+		memcpy(&ocr->src.flat[pos], ocr->background, ocr->src.pixsz);
 		return -1;
 	}
 	
-	src.used[pos] = 1;
+	ocr->src.used[pos] = 1;
 	
-	memcpy(&src.flat[pos], rep, src.pixsz);
+	memcpy(&ocr->src.flat[pos], ocr->rep, ocr->src.pixsz);
 	
-	flood_fill(src, index_flat(src, pos, 0, -1), find, rep, threshold);
-	flood_fill(src, index_flat(src, pos, 0,  1), find, rep, threshold);
-	flood_fill(src, index_flat(src, pos, -1, 0), find, rep, threshold);
-	flood_fill(src, index_flat(src, pos, 1,  0), find, rep, threshold);
+	flood_fill(ocr, index_flat(ocr->src, pos, 0, -1));
+	flood_fill(ocr, index_flat(ocr->src, pos, 0,  1));
+	flood_fill(ocr, index_flat(ocr->src, pos, -1, 0));
+	flood_fill(ocr, index_flat(ocr->src, pos, 1,  0));
 	
-	flood_fill(src, index_flat(src, pos, 1, -1), find, rep, threshold);
-	flood_fill(src, index_flat(src, pos, -1, 1), find, rep, threshold);
-	flood_fill(src, index_flat(src, pos, -1,-1), find, rep, threshold);
-	flood_fill(src, index_flat(src, pos, 1,  1), find, rep, threshold);
+	flood_fill(ocr, index_flat(ocr->src, pos, 1, -1));
+	flood_fill(ocr, index_flat(ocr->src, pos, -1, 1));
+	flood_fill(ocr, index_flat(ocr->src, pos, -1,-1));
+	flood_fill(ocr, index_flat(ocr->src, pos, 1,  1));
 	
 	return 0;
 }
@@ -240,50 +240,6 @@ int flood_boundaries (struct img_dt src, int pos, unsigned char *find,
 		pop(&cmp_queue);
 	
 	return 0;
-}
-
-
-int fill_lines (struct img_dt src, struct line_entry *lines, int num_lines, 
-		unsigned char *background, unsigned char *rep, int **letter_pos)
-{
-	int last_mid_line, mid_line, i, pos;
-	int end = (src.x * src.y);
-	struct queue letter_queue;
-	int num_letters = 0;
-	
-	memset(&letter_queue, 0, sizeof(struct queue));
-	
-	mid_line = last_mid_line = 0;
-	
-	for (i = 0; i < num_lines; i++) {
-		last_mid_line = mid_line + (10 * src.x);
-		mid_line = src.x * ((lines[i].end + lines[i].start) / 2);
-		
-		memset(&src.flat[mid_line], 0x40, src.x);
-
-		for (pos = last_mid_line; pos < mid_line; pos += src.pixsz)
-			if (!flood_fill(src, pos, background, rep, 127))
-				push(&letter_queue, pos);
-				
-		for (pos = (last_mid_line - (9 * src.x)); pos < last_mid_line; 
-							pos += src.pixsz)
-			if (!flood_fill(src, pos, background, rep, 127))
-				push(&letter_queue, pos);
-	}
-	
-	for (pos = mid_line + src.x; pos < end; pos += src.pixsz)
-		if (!flood_fill(src, pos, background, rep, 127))
-			push(&letter_queue, pos);
-
-	num_letters = letter_queue.size;
-	
-	*letter_pos = calloc(sizeof(int), letter_queue.size + 1);
-	i = 0;
-	
-	while (letter_queue.size) 
-		(*letter_pos)[i++] = pop(&letter_queue);
-	
-	return num_letters;
 }
 
 int cmp_block_letter (struct img_dt src, struct letter_data l1, 
@@ -507,6 +463,11 @@ int read_letters (struct ocr_data ocr)
 		min_val = MAX_MIN_CMP;
 		memset(min_buf, 0, sizeof(min_buf));
 		
+		fprintf(stderr, "[%s]: letter #%d at pos %d: (%d, %d) -> (%d, %d)\n", 
+			__func__, i, ocr.letters[i], 
+			ocr.glyphs[i].x0, ocr.glyphs[i].y0, 
+			ocr.glyphs[i].x1, ocr.glyphs[i].y1);
+		
 		if (find_closest(ocr.let_path, &min_val, min_buf, ocr.src, 
 				 ocr.glyphs[i], ocr.background) < 0)
 			printf("couldn't find closest\n");
@@ -535,16 +496,16 @@ int read_letters (struct ocr_data ocr)
 
 int measure_letters (struct ocr_data *ocr)
 {
-	int i; 
+	int i; 		/* WARNING: function allocates memory to ocr->glyphs */
 
-	ocr->glyphs = calloc(sizeof(struct letter_data), ocr->num_letters + 1);
+	if (!ocr || !(ocr->glyphs = calloc(sizeof(struct letter_data), 
+					   ocr->num_letters + 1)))
+		return -1;
 	
 	for (i = 0; i < ocr->num_letters; i++) {
 		ocr->glyphs[i].buf_pos = ocr->letters[i];
 
-		ocr->src.flat[ocr->letters[i] + 0] = 0x90;
-		ocr->src.flat[ocr->letters[i] + 1] = 0x10;
-		ocr->src.flat[ocr->letters[i] + 2] = 0x10;
+		memset(&ocr->src.flat[ocr->letters[i]], 0, ocr->src.pixsz);
 
 		flood_boundaries(ocr->src, ocr->letters[i], ocr->background, 
 				&(ocr->glyphs[i].x0), &(ocr->glyphs[i].y0), 
@@ -552,46 +513,49 @@ int measure_letters (struct ocr_data *ocr)
 
 		ocr->glyphs[i].x1 += ocr->src.pixsz;
 		ocr->glyphs[i].y1 += 1;
-
-		fprintf(stderr, "[%s]: letter #%d at pos %d: (%d, %d) -> (%d, %d)\n", 
-			__func__, i, ocr->letters[i], 
-			ocr->glyphs[i].x0, ocr->glyphs[i].y0, 
-			ocr->glyphs[i].x1, ocr->glyphs[i].y1);
 	}
 
 	return 0;
 }
 
-int measure_letters_old (struct img_dt src, int num_letters, int *letters, 
-		     struct letter_data **gptr, unsigned char *background)
+int fill_lines (struct ocr_data *ocr)
 {
-	int i; 
-	struct letter_data *glyphs;
+	int srcx = ocr->src.x;
+	int pxsz = ocr->src.pixsz;
+	int end = ocr->src.x * ocr->src.y;
+	struct queue letter_queue;
+	int i, pos, mid_line = 0, last_mid = 0;
 	
-	(*gptr) = glyphs = calloc(sizeof(struct letter_data), num_letters + 1);
-	
-	for (i = 0; i < num_letters; i++) {
-		glyphs[i].buf_pos = letters[i];
+	memset(&letter_queue, 0, sizeof(struct queue));
 
-		src.flat[letters[i] + 0] = 0x90;
-		src.flat[letters[i] + 1] = 0x10;
-		src.flat[letters[i] + 2] = 0x10;
+	for (i = 0; i < ocr->num_lines; i++) {
+		last_mid = mid_line + (10 * srcx);
+		mid_line = srcx * ((ocr->lines[i].end + ocr->lines[i].start) / 2);
+		
+		memset(&ocr->src.flat[mid_line], 0x40, srcx);
 
-		/* too high to fix this */
-		flood_boundaries(src, letters[i], background, 
-				&(glyphs[i].x0), &(glyphs[i].y0), 
-				&(glyphs[i].x1), &(glyphs[i].y1));
-
-		glyphs[i].x1 += src.pixsz;
-		glyphs[i].y1 += 1;
-
-		fprintf(stderr, "[%s]: letter #%d at pos %d: (%d, %d) -> (%d, %d)\n", 
-			__func__, i, letters[i], 
-			glyphs[i].x0, glyphs[i].y0, 
-			glyphs[i].x1, glyphs[i].y1);
+		for (pos = last_mid; pos < mid_line; pos += pxsz)
+			if (!flood_fill(ocr, pos))
+				push(&letter_queue, pos);
+				
+		for (pos = (last_mid - (9 * srcx)); pos < last_mid; pos += pxsz)
+			if (!flood_fill(ocr, pos))
+				push(&letter_queue, pos);
 	}
+	
+	for (pos = mid_line + srcx; pos < end; pos += pxsz)
+		if (!flood_fill(ocr, pos))
+			push(&letter_queue, pos);
 
-	return 0;
+	ocr->num_letters = letter_queue.size;
+	
+	ocr->letters = calloc(sizeof(int), letter_queue.size + 1);
+	i = 0;
+	
+	while (letter_queue.size) 
+		ocr->letters[i++] = pop(&letter_queue);
+	
+	return ocr->num_letters;
 }
 
 
@@ -609,6 +573,7 @@ int main (int argc, const char **argv)
 	ocr.src_path = "/Users/nobody1/Desktop/test.png";
 	ocr.let_path = "/Users/nobody1/Desktop/letters";
 	ocr.dst_path = "/Users/nobody1/Desktop/out.png";
+	ocr.tolerance = 127;
 	
 	if (alloc_img_from_file(ocr.src_path, &(ocr.src), 0))
 		return -1;
@@ -617,13 +582,11 @@ int main (int argc, const char **argv)
 	
 	ocr.num_lines = split_lines(ocr.src, 0xFF, &(ocr.lines));
 
-	ocr.num_letters = fill_lines(ocr.src, ocr.lines, ocr.num_lines,
-				ocr.background, ocr.rep, &(ocr.letters));
-	
-	//measure_letters(ocr.src, ocr.num_letters, ocr.letters, 
-	//		&(ocr.glyphs), ocr.background);
-	
-	measure_letters(&ocr);
+	if (fill_lines(&ocr) < 0)
+		printf("error detecting lines\n");
+
+	if (measure_letters(&ocr) < 0)
+		printf("error measuring\n");
 
 	if (read_letters(ocr) < 0)
 		printf("error reading\n");
