@@ -161,20 +161,41 @@ int split_lines (struct img_dt src, unsigned char background,
 	return num_lines;
 }
 
+void push_adjacent (struct img_dt src, struct queue *cq, int pos)
+{
+	int s, d;
+	
+	for (s = -1; s <= 1; s++)
+		for (d = -1; d <= 1; d++)
+			if (s || d)
+				push(cq, index_flat(src, pos, s, d));
+}
+
+int32_t abs_no_branch (int32_t src)
+{
+	uint32_t tmp = (uint32_t)src;
+	
+	tmp >>= 1;
+	tmp <<= 1;
+	
+	return (int32_t)(tmp & 0x7FFFFFFF);
+}
+
 int flood_fill (struct ocr_data *ocr, int pos)
 {
-	struct queue cmp_queue;
-	int flag = 0;
+	struct queue cq;
+	int i, total = 0, flag = 0;
 	
-	memset(&cmp_queue, 0, sizeof(struct queue));
+	memset(&cq, 0, sizeof(struct queue));
 	
-	push(&cmp_queue, pos);
+	push(&cq, pos);
 	
-	while (cmp_queue.size) {
-		if ((pos = pop(&cmp_queue)) < 0 || ocr->src.used[pos])
+	while (cq.size) {
+		total = 0;
+		if ((pos = pop(&cq)) < 0 || ocr->src.used[pos])
 			continue;	
 			
-		int i, s, d, total = 0;
+		
 		for (i = 0; i < ocr->src.pixsz; i++) {
 			if (ocr->src.flat[pos + i] > ocr->background[i])
 				total += (ocr->src.flat[pos + i] - 
@@ -193,14 +214,8 @@ int flood_fill (struct ocr_data *ocr, int pos)
 		ocr->src.used[pos] = 1;
 	
 		memcpy(&ocr->src.flat[pos], ocr->rep, ocr->src.pixsz);
-	
-		for (s = -1; s <= 1; s++)
-			for (d = -1; d <= 1; d++)
-				if (s || d)
-					push(&cmp_queue, 
-					     index_flat(ocr->src, pos, s, d));
-
-	
+		
+		push_adjacent(ocr->src, &cq, pos);
 	}
 	
 	return (!flag) ? -1 : 0;
@@ -211,7 +226,7 @@ int flood_boundaries (struct img_dt src, int pos, unsigned char *find,
 		int *x0, int *y0, int *x1, int *y1)
 {				
 	struct queue cmp_queue;
-	int s, d, cx, cy;
+	int cx, cy;
 	
 	memset(src.used, 0, src.x * src.y);
 	
@@ -240,10 +255,7 @@ int flood_boundaries (struct img_dt src, int pos, unsigned char *find,
 		if (cy >= *y1)	*y1 = cy;
 		if (cy <= *y0)	*y0 = cy;
 		
-		for (s = -1; s <= 1; s++)
-			for (d = -1; d <= 1; d++)
-				if (s || d)
-					push(&cmp_queue, index_flat(src, pos, s, d));
+		push_adjacent(src, &cmp_queue, pos);
 	}
 	
 	while (cmp_queue.size)
@@ -534,13 +546,22 @@ int measure_letters (struct ocr_data *ocr)
 	return 0;
 }
 
+void queue_push_loop (struct ocr_data *ocr, struct queue *letter_queue, 
+			int start, int end)
+{
+	int pos;
+	
+	for (pos = start; pos < end; pos += ocr->src.pixsz)
+		if (!flood_fill(ocr, pos))
+			push(letter_queue, pos);
+}
+
 int fill_lines (struct ocr_data *ocr)
 {
-	int srcx = ocr->src.x;
-	int pxsz = ocr->src.pixsz;
+	int srcx = ocr->src.x;	/* WARNING: allocates memory to ocr->letters */
 	int end = ocr->src.x * ocr->src.y;
 	struct queue letter_queue;
-	int i, pos, mid_line = 0, last_mid = 0;
+	int i, mid_line = 0, last_mid = 0;
 	
 	memset(&letter_queue, 0, sizeof(struct queue));
 	memset(ocr->src.used, 0, ocr->src.x * ocr->src.y);
@@ -550,27 +571,17 @@ int fill_lines (struct ocr_data *ocr)
 		mid_line = srcx * ((ocr->lines[i].end + ocr->lines[i].start) / 2);
 		
 		memset(&ocr->src.flat[mid_line], 0x40, srcx);
-
-		for (pos = last_mid; pos < mid_line; pos += pxsz)
-			if (!flood_fill(ocr, pos))
-				push(&letter_queue, pos);
-				
-		for (pos = (last_mid - (9 * srcx)); pos < last_mid; pos += pxsz)
-			if (!flood_fill(ocr, pos))
-				push(&letter_queue, pos);
+		
+		queue_push_loop(ocr, &letter_queue, last_mid, mid_line);
+		queue_push_loop(ocr, &letter_queue, (last_mid - (9 * srcx)), last_mid);	
 	}
-	
-	for (pos = mid_line + srcx; pos < end; pos += pxsz)
-		if (!flood_fill(ocr, pos))
-			push(&letter_queue, pos);
+	queue_push_loop(ocr, &letter_queue, mid_line + srcx, end);
 
 	ocr->num_letters = letter_queue.size;
-	
 	ocr->letters = calloc(sizeof(int), letter_queue.size + 1);
-	i = 0;
-	
-	while (letter_queue.size) 
-		ocr->letters[i++] = pop(&letter_queue);
+
+	for (i = 0; letter_queue.size; i++) 
+		ocr->letters[i] = pop(&letter_queue);
 	
 	return ocr->num_letters;
 }
@@ -617,10 +628,10 @@ int main (int argc, const char **argv)
 {
 	struct ocr_data ocr;
 
-	if (ocr_init(&ocr, "/Users/nobody1/Desktop/test.png",
+	if (ocr_init(&ocr, "/Users/nobody1/Desktop/allchars.png",
 			   "/Users/nobody1/Desktop/letters", 
 			   "/Users/nobody1/Desktop/out.png",
-			   127, 0xFFFFFFFF, 0x209999FF) < 0) { 
+			   127, 0xFFFFFFFF, 0xFF999920) < 0) { 
 		printf("error initializing ocr\n");
 		return -1;
 	}
