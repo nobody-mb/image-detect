@@ -628,7 +628,7 @@ int main (int argc, const char **argv)
 {
 	struct ocr_data ocr;
 
-	if (ocr_init(&ocr, "/Users/nobody1/Desktop/allchars.png",
+	if (ocr_init(&ocr, "/Users/nobody1/Desktop/test.png",
 			   "/Users/nobody1/Desktop/letters", 
 			   "/Users/nobody1/Desktop/out.png",
 			   127, 0xFFFFFFFF, 0xFF999920) < 0) { 
